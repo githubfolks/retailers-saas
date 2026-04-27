@@ -24,12 +24,14 @@ services:
     image: odoo-saas-custom:latest
     container_name: odoo_saas_odoo
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
-      HOST: postgres-app
-      USER: odoo_user
-      PASSWORD: odoo_password
-      ODOO_DB_NAME: app_db
-      ODOO_MASTER_PASS: admin_password
+      HOST: ${DB_HOST:-postgres}
+      USER: ${DB_USER:-odoo_user}
+      PASSWORD: ${DB_PASSWORD:-odoo_password}
+      ODOO_DB_NAME: ${DB_NAME:-app_db}
+      ODOO_MASTER_PASS: ${ODOO_MASTER_PASS:-admin_password}
     ports:
       - "${ODOO_PORT:-8069}:8069"
     volumes:
