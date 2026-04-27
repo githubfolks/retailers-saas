@@ -1,0 +1,458 @@
+🧩 PHASE 0: ENVIRONMENT SETUP
+✅ Tasks
+Install Odoo (recommended: v16 or v17)
+Setup PostgreSQL
+Configure staging + production environments
+Enable developer mode
+✅ Acceptance Criteria
+Odoo accessible via domain
+DB backup & restore working
+API access verified (/web/dataset/call_kw)
+🧩 PHASE 1: MODULE INSTALLATION
+✅ Install Modules
+Core
+base, web, mail, contacts
+Business
+sale_management
+purchase
+stock
+stock_account
+account
+product
+Extensions
+stock_barcode
+sale_stock
+mrp (if manufacturing)
+point_of_sale (if retail)
+website_sale (if ecommerce)
+✅ Acceptance Criteria
+All modules installed without errors
+No dependency conflicts
+Basic flows working (sale → delivery → invoice)
+🧩 PHASE 2: MASTER DATA DESIGN (CRITICAL)
+✅ 2.1 Product Attributes Setup
+
+Create attributes:
+
+Size (S, M, L, XL, XXL)
+Color (Red, Blue, Black…)
+Brand
+Fabric (optional)
+✅ 2.2 Product Category Structure
+
+Example:
+
+Men
+  → Shirts
+  → T-Shirts
+Women
+  → Kurtis
+  → Dresses
+✅ 2.3 SKU STRUCTURE (MANDATORY)
+
+Define format:
+
+CAT-BRAND-SIZE-COLOR
+Example: MSHRT-NIKE-L-BLK
+✅ Acceptance Criteria
+Variant creation generates correct combinations
+SKU is unique per variant
+No duplicate variants allowed
+🧩 PHASE 3: PRODUCT & VARIANT MANAGEMENT
+✅ Tasks
+Create product.template
+Generate variants using attributes
+Assign:
+SKU (default_code)
+Barcode
+Cost price
+Sale price
+✅ API Tasks
+Create product via API
+Fetch variants via API
+Update stock via API
+✅ Acceptance Criteria
+Variant grid visible (matrix)
+Each variant selectable independently
+API CRUD working
+🧩 PHASE 4: INVENTORY CONFIGURATION
+✅ Tasks
+Enable:
+Multi-warehouse
+Multi-location
+Create structure:
+Warehouse
+  → Rack A
+    → Shelf 1
+Configure:
+Stock valuation (FIFO recommended)
+Reordering rules
+✅ Acceptance Criteria
+Stock moves tracked location-wise
+Transfer between locations works
+Inventory valuation reports correct
+🧩 PHASE 5: BARCODE SYSTEM
+✅ Tasks
+Enable barcode module
+Assign barcode per variant
+Setup barcode scanner flow:
+Receive goods
+Internal transfer
+Sales
+✅ Acceptance Criteria
+Scan → product auto-detected
+Stock updates via barcode
+No duplicate barcode allowed
+🧩 PHASE 6: PURCHASE FLOW
+✅ Tasks
+Create vendors
+Configure vendor pricelist
+Create purchase orders
+Receive goods into stock
+✅ Acceptance Criteria
+PO → Receipt → Stock updated
+Cost price updated correctly
+Vendor history maintained
+🧩 PHASE 7: SALES FLOW
+✅ Tasks
+Create quotations
+Confirm sales orders
+Generate delivery orders
+Generate invoices
+✅ Acceptance Criteria
+SO → Delivery → Invoice works end-to-end
+Variant selection (size/color) working
+Margin visible per order
+🧩 PHASE 8: POS (IF RETAIL)
+✅ Tasks
+Configure POS
+Sync products with variants
+Enable barcode scanning
+Setup payment methods
+✅ Acceptance Criteria
+Fast billing (<2 sec per item)
+Variant selection in POS
+Daily sales report generated
+🧩 PHASE 9: MANUFACTURING (IF APPLICABLE)
+✅ Tasks
+Create BOM:
+Fabric
+Buttons
+Thread
+Configure:
+Work centers
+Routing (cutting → stitching → finishing)
+Subcontracting setup
+✅ Acceptance Criteria
+Production order creates finished goods
+Raw material consumption tracked
+Job work flow working
+🧩 PHASE 10: ACCOUNTING & GST
+✅ Tasks
+Install India localization
+Configure GST taxes
+Setup chart of accounts
+Configure invoicing
+✅ Acceptance Criteria
+GST invoices generated correctly
+Tax reports match compliance
+P&L and balance sheet working
+🧩 PHASE 11: REPORTING (BUSINESS CRITICAL)
+✅ Must-have Reports
+Sales by:
+Size
+Color
+Category
+Inventory:
+Dead stock
+Fast-moving items
+Financial:
+Profit per SKU
+✅ Acceptance Criteria
+Reports exportable (Excel)
+Filters working (date, category, brand)
+Data matches actual transactions
+🧩 PHASE 12: CUSTOM MODULES (MANDATORY FOR YOU)
+✅ 12.1 SKU Generator
+Auto-generate SKU on variant creation
+✅ 12.2 Bulk Upload System
+Excel import:
+Products
+Variants
+Prices
+✅ 12.3 Season Module
+Add:
+Season field (Summer/Winter)
+Collection tagging
+✅ 12.4 Advanced Dashboard
+KPIs:
+Top selling sizes
+Dead stock
+Revenue by brand
+✅ Acceptance Criteria
+Zero manual SKU entry
+Bulk upload handles 10k+ products
+Dashboard loads <5 sec
+🧩 PHASE 13: API VALIDATION (IMPORTANT FOR YOU)
+✅ Required APIs
+Product create/update
+Variant list
+Stock update
+Sales order create
+Purchase order create
+✅ Acceptance Criteria
+APIs handle bulk data
+Response time <500ms (avg)
+Proper error handling
+🧩 PHASE 14: SECURITY & ROLES
+✅ Roles
+Admin
+Warehouse Manager
+Sales User
+Accountant
+✅ Tasks
+Restrict access per role
+Enable audit logs
+✅ Acceptance Criteria
+Unauthorized access blocked
+Logs track all changes
+🧩 PHASE 15: GO-LIVE CHECKLIST
+✅ Final Checks
+Data migration completed
+Opening stock uploaded
+Users trained
+Backup scheduled
+✅ Acceptance Criteria
+Live transactions working
+No critical bugs
+Daily operations smooth
+=======================
+
+
+1. 🧵 Product Variants Matrix (Size × Color Grid)
+Priority: CRITICAL
+
+What's missing: The ProductSKU model has color and size as free-text fields. There is no proper variant matrix — the grid that shows all combinations of Size (S/M/L/XL) × Color (Red/Blue/Black) as a visual table.
+
+Real-life impact:
+
+A buyer cannot select "Blue L" vs "Blue M" from a single product
+Reporting can't show "XL selling faster than S" without this structure
+No way to prevent duplicate variant combinations
+What's needed:
+
+ProductTemplate → ProductAttribute (Size, Color, Fabric) → AttributeValues
+ProductVariant with variant_combination as unique constraint
+Visual Variant Matrix UI (the grid/spreadsheet view for stock entry)
+Variant-level pricing (XL may cost more than S)
+2. 📄 GST Compliance & Tax Engine
+Priority: CRITICAL (India-specific)
+
+What's missing: The Order model has tax_type and tax_amount fields, but there is no actual GST calculation engine — no HSN codes, no CGST/SGST/IGST split, no B2B vs B2C differentiation.
+
+Real-life impact:
+
+Every invoice is legally invalid without correct GST
+Cannot file GSTR-1 / GSTR-3B without structured tax data
+Garments have different GST slabs: 5% (< ₹1000), 12% (> ₹1000)
+What's needed:
+
+HSN Code field on ProductSKU
+GST rate slab engine (5% / 12% / 18% based on value)
+CGST + SGST vs IGST split based on customer state
+B2B invoice with customer GSTIN
+GSTR-1 export (JSON format for filing)
+E-Invoice (IRN generation for B2B > ₹5 Cr turnover)
+3. 🏭 Manufacturing / Job Work Module
+Priority: HIGH (Critical if you do in-house stitching)
+
+What's missing: No manufacturing model at all. Phase 9 in your implementation list covers this but nothing has been built.
+
+Real-life impact:
+
+Cannot track fabric consumption → finished garment conversion
+Cannot manage subcontracting (cut → stitch → finish)
+No Bill of Materials (BOM) to know raw material cost per piece
+Cannot track work-in-progress (WIP) inventory
+What's needed:
+
+BillOfMaterials model (Fabric: 1.5m + Thread: 50m + Buttons: 6 → 1 Shirt)
+WorkOrder / ProductionOrder model
+Raw material reservation on production start
+Subcontracting flow (job work to external tailor)
+Fabric defect tracking (QC before cutting)
+WIP stock locations (Cutting Stage, Stitching Stage, Finishing)
+4. 📦 Bulk Import / Excel Upload
+Priority: HIGH
+
+What's missing: No bulk product upload endpoint or UI. For a garment business with 500-10,000 SKUs (per season), manual entry is not feasible.
+
+Real-life impact:
+
+Adding a new season's catalog (200 styles × 5 colors × 5 sizes = 5,000 variants) manually is impossible
+No way to update prices in bulk before season change
+Cannot import opening stock from Excel
+What's needed:
+
+Excel/CSV upload endpoint for Products, Variants, Stock, Prices
+Validation with error report (show which rows failed and why)
+Template download with correct column headers
+Duplicate SKU detection on upload
+Async processing via Celery for large files
+5. 📊 Business Intelligence & Reporting
+Priority: HIGH
+
+What's missing: analytics.py is only 2.4KB. The existing "Financial Intelligence" page calls one endpoint. No garment-specific reports exist.
+
+Real-life impact:
+
+Cannot answer: "Which size is selling most this season?"
+Cannot see dead stock (items with 0 sales in 90 days)
+Cannot compare revenue by brand/category/supplier
+No P&L per SKU (needed for pricing decisions)
+What's needed:
+
+Size/Color Sales Matrix — which combinations sell and which don't
+Dead Stock Report — items unsold for 30/60/90 days with ageing value
+Fast Movers vs Slow Movers — Pareto / ABC analysis
+Season vs Season comparison (Summer 2024 vs Summer 2025)
+Gross Margin per SKU (selling price − cost price × qty sold)
+Supplier-wise purchase analysis (who delivered on time, who didn't)
+Customer purchase frequency (loyalty & repeat rate)
+Excel export for all reports
+6. 🔄 Season & Collection Management
+Priority: HIGH (Garment-specific)
+
+What's missing: No Season or Collection model exists. Your implementation plan (Phase 12.3) lists this but it hasn't been built.
+
+Real-life impact:
+
+Cannot tag products to Summer/Winter/Festive collections
+Cannot archive last season's catalog cleanly
+Cannot run "End of Season Sale" with automatic markdowns on aged stock
+Reports cannot filter by season
+What's needed:
+
+Season model (Summer 2025, Winter 2024, Festive 2025)
+Collection tags per product/variant
+Season-based price override (MRP vs season sale price)
+End-of-season auto-discount workflow
+Season close → move unsold stock to clearance location
+7. 👥 Staff & Role Management
+Priority: MEDIUM-HIGH
+
+What's missing: Auth has owner and staff roles (two levels only). No granular permissions exist.
+
+Real-life impact:
+
+A cashier (POS staff) can see procurement costs
+A warehouse picker doesn't need access to financials
+No shift management or daily sales accountability per staff
+What's needed:
+
+Roles: Owner, Manager, Cashier, Warehouse Staff, Accountant
+Module-level permissions (who can see Procurement vs POS vs Reports)
+Shift open/close for POS cashiers (cash register accountability)
+Staff-wise sales report (who billed how much today)
+PIN-based POS login (quick switch between staff)
+8. 📱 WhatsApp Catalog & Order Bot
+Priority: MEDIUM-HIGH
+
+What's missing: WhatsApp is connected but only used for notifications. No interactive ordering bot exists. Phase 19 in your AI plan (LLM Chatbot) is not built.
+
+Real-life impact:
+
+Wholesale buyers typically order via WhatsApp in Indian garment trade
+No way to share a digital catalog link via WhatsApp
+No automated order confirmation / dispatch updates via WhatsApp
+What's needed:
+
+WhatsApp catalog sync (share product images + prices)
+Automated order flow: Customer sends product code → bot shows price → customer confirms → order created
+Dispatch notification with tracking number
+Return request via WhatsApp
+Low stock alert to owner via WhatsApp
+9. 💳 Loyalty & Credit Management
+Priority: MEDIUM
+
+What's missing: Coupons exist but no loyalty points, no store credit, no credit limit for wholesale buyers.
+
+Real-life impact:
+
+No repeat purchase incentive for retail customers
+Wholesale buyers often buy on credit — no credit limit tracking
+Cannot do "Buy 5 get 1 free" type promotions for bulk buyers
+What's needed:
+
+Loyalty points earn/redeem (1 point per ₹10 spent)
+Customer credit limit (for wholesale/B2B accounts)
+Aging report for outstanding credit (who owes how much)
+Store credit for returns (instead of cash refund)
+10. 📝 Physical Stock Count (Cycle Count)
+Priority: MEDIUM
+
+What's missing: The InventoryCount and CountLine models exist in the database but there is zero UI or API endpoint for conducting a physical stock count.
+
+Real-life impact:
+
+Cannot do monthly/quarterly physical verification
+System stock and actual stock will diverge over time
+Shrinkage (theft/loss) is invisible
+What's needed:
+
+Create a stock count session (select warehouse/location)
+Print a count sheet (barcode + product + system qty)
+Enter counted qty via barcode scan or manual entry
+System generates variance report (system qty vs counted qty)
+One-click adjustment to reconcile differences
+11. 🚚 Delivery Challan & E-Way Bill
+Priority: MEDIUM (Indian compliance)
+
+What's missing: Invoices exist but no Delivery Challan (DC) or E-Way Bill generation.
+
+Real-life impact:
+
+Moving goods worth > ₹50,000 without E-Way Bill is illegal under GST
+Deliveries to wholesale buyers need a Delivery Challan
+Stock transfers between warehouses need a DC
+What's needed:
+
+Delivery Challan template (against sale order or stock transfer)
+E-Way Bill JSON generation (for NIC portal API)
+Vehicle number + transporter details on shipment
+DC print/PDF download
+
+=============AI/ML FEATURES
+| #  | Feature                    | Business Use                     | ML Model(s)                                         | Input Data                                     | Output                   | Implementation Notes                      |
+| -- | -------------------------- | -------------------------------- | --------------------------------------------------- | ---------------------------------------------- | ------------------------ | ----------------------------------------- |
+| 1  | Demand Forecasting         | Predict size/color demand        | Prophet, ARIMA, LSTM                                | Sales history (`sale.order.line`), seasonality | Forecast qty per SKU     | Start with Prophet → upgrade to LSTM      |
+| 2  | Smart Reordering           | Auto purchase suggestions        | Regression, Time-series                             | Sales velocity, lead time, stock               | Reorder qty + date       | Integrate with Odoo reordering rules      |
+| 3  | Dead Stock Detection       | Identify unsold items            | K-Means, Rule-based                                 | Sales + inventory aging                        | Dead stock list          | Add threshold (e.g., 90 days no sale)     |
+| 4  | Dynamic Pricing            | Optimize price/discount          | Linear Regression, XGBoost                          | Demand, stock level, past pricing              | Suggested price/discount | Combine ML + rule engine                  |
+| 5  | Recommendation Engine      | Upsell / cross-sell              | Collaborative Filtering (ALS), Matrix Factorization | Order history                                  | “Customers also bought”  | Store embeddings in DB                    |
+| 6  | Size Recommendation        | Suggest best fit                 | Classification (Random Forest, NN)                  | Purchase + return data                         | Recommended size         | Needs return/exchange data                |
+| 7  | Visual Search              | Find similar products from image | CNN (ResNet, EfficientNet) + FAISS                  | Product images                                 | Similar product IDs      | Precompute embeddings                     |
+| 8  | Auto Product Tagging       | Detect color, type, pattern      | CNN (Image Classification)                          | Product images                                 | Tags (color, type)       | Automate product creation                 |
+| 9  | Sales Trend Detection      | Identify trending SKUs           | Time-series + anomaly detection                     | Sales data                                     | Trend alerts             | Weekly/monthly trend reports              |
+| 10 | Customer Segmentation      | Group buyers                     | K-Means, DBSCAN                                     | Customer purchase behavior                     | Customer segments        | Use for targeted marketing                |
+| 11 | Churn Prediction           | Identify lost customers          | Logistic Regression, XGBoost                        | Purchase frequency                             | Churn probability        | Trigger offers                            |
+| 12 | Fraud Detection            | Detect fake orders/returns       | Isolation Forest, One-Class SVM                     | Orders, returns                                | Fraud alerts             | Monitor unusual patterns                  |
+| 13 | Delivery ETA Prediction    | Improve delivery accuracy        | Regression, Gradient Boosting                       | Past deliveries, location                      | ETA prediction           | Useful for eCommerce                      |
+| 14 | Fabric Defect Detection    | QC in manufacturing              | CNN, OpenCV                                         | Fabric images (camera feed)                    | Defect detection         | Use Raspberry Pi setup (your use case 👍) |
+| 15 | Inventory Classification   | ABC analysis                     | Clustering, Pareto                                  | Sales + revenue                                | A/B/C category           | Optimize stock focus                      |
+| 16 | Purchase Price Prediction  | Forecast vendor pricing          | Regression                                          | Historical purchase price                      | Expected cost            | Helps negotiation                         |
+| 17 | Return Prediction          | Predict product returns          | Classification                                      | Order + return history                         | Return probability       | Reduce reverse logistics cost             |
+| 18 | Promotion Effectiveness    | Evaluate campaigns               | Causal ML, Regression                               | Campaign + sales data                          | ROI of campaigns         | Improve marketing spend                   |
+| 19 | Chatbot (AI Assistant)     | Customer interaction             | LLM + Retrieval (RAG)                               | Product DB + FAQs                              | Answers/orders           | Integrate with WhatsApp API               |
+| 20 | Attribute Extraction (NLP) | Auto-generate product data       | NLP (BERT)                                          | Product descriptions                           | Structured attributes    | Useful for bulk import                    |
+
+
+TODO:
+POS improvements.
+Payments integration with Razorpay & UPI.
+For real-time bidirectional sync (inventory, catalog, order status), you'd need to add outbound webhooks and fix the order line-item model first.
+No mobile app — POS runs in a browser, which limits counter use on tablets/phones
+No offline mode — POS needs internet; a power cut or connectivity drop halts sales
+Single line-item per order — as discussed, real e-comm carts need a proper OrderItem table before this competes with Shopify or WooCommerce
+No built-in analytics dashboard — summary numbers exist but no charts, trends, or cohort analysis
+

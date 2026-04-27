@@ -1,0 +1,16 @@
+/* Hide Powered by Odoo branding */
+a[href*="odoo.com"],
+a[href*="odoo.com"]:before,
+a[href*="odoo.com"]:after {
+    display: none !important;
+    visibility: hidden !important;
+}
+
+/* Alternative selectors */
+.o_footer_powered,
+.footer-powered-by,
+footer .powered-by,
+.powered-by {
+    display: none !important;
+}
+

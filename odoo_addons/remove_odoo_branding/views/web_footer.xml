@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <!-- Override the web footer to remove Odoo branding -->
+        <template id="web.layout" inherit_id="web.layout">
+            <xpath expr="//footer//a[contains(text(), 'Powered by')]" position="replace">
+            </xpath>
+        </template>
+    </data>
+</odoo>

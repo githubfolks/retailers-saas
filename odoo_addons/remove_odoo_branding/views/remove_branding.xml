@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <!-- Hide Powered by Odoo footer link -->
+        <!-- Temporarily disabled as it causes ParseError in Odoo 17 -->
+        <template id="remove_branding_footer_link" inherit_id="web.login_layout">
+            <!-- <xpath expr="//div//a[contains(@href, 'odoo.com') and contains(., 'Powered')]" position="replace">
+            </xpath> -->
+        </template>
+    </data>
+</odoo>

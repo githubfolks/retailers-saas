@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RetailERP | Admin Portal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/dashboard.css">
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+
+<body>
+    <div id="root"></div>
+
+    <script crossorigin src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useCallback } = React;
+
+        const Icon = ({ name, size = 20, className = "" }) => {
+            const [html, setHtml] = useState('');
+
+            useEffect(() => {
+                const generateIcon = () => {
+                    if (!window.lucide) return;
+
+                    const PascalName = name.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join('');
+                    const camelName = name.split('-').map((s, i) => i > 0 ? s.charAt(0).toUpperCase() + s.slice(1) : s).join('');
+
+                    try {
+                        const iconObj = window.lucide.icons?.[name] ||
+                                        window.lucide.icons?.[camelName] ||
+                                        window.lucide[PascalName];
+
+                        if (iconObj && typeof iconObj.toSvg === 'function') {
+                            setHtml(iconObj.toSvg({ width: size, height: size, 'stroke-width': 2, class: className }));
+                            return;
+                        }
+                    } catch (e) { /* continue to fallback */ }
+
+                    try {
+                        const wrapper = document.createElement('div');
+                        wrapper.style.cssText = 'position:absolute;left:-9999px;visibility:hidden;pointer-events:none;';
+                        const i = document.createElement('i');
+                        i.setAttribute('data-lucide', name);
+                        wrapper.appendChild(i);
+                        document.body.appendChild(wrapper);
+                        window.lucide.createIcons();
+                        setHtml(wrapper.innerHTML);
+                        document.body.removeChild(wrapper);
+                    } catch (e) {
+                        console.error('Lucide icon failed:', name, e);
+                    }
+                };
+
+                generateIcon();
+
+                if (!window.lucide) {
+                    const checkInterval = setInterval(() => {
+                        if (window.lucide) {
+                            generateIcon();
+                            clearInterval(checkInterval);
+                        }
+                    }, 50);
+                    return () => clearInterval(checkInterval);
+                }
+            }, [name, size, className]);
+
+            return <span 
+                className={`icon-wrapper ${className}`}
+                style={{ 
+                    display: 'inline-flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'center', 
+                    width: size, 
+                    height: size,
+                    verticalAlign: 'middle',
+                    lineHeight: 0
+                }}
+                dangerouslySetInnerHTML={{ __html: html }}
+            />;
+        };
+
+        const Toast = ({ message, type }) => (
+            <div className={`toast ${type} animate-toast`}>
+                <Icon name={type === 'success' ? 'check-circle' : 'alert-circle'} size={18} />
+                <span>{message}</span>
+            </div>
+        );
+
+        const SidebarItem = ({ id, label, icon, active, onClick }) => (
+            <button
+                className={`nav-item ${active ? 'active' : ''}`}
+                onClick={() => onClick(id)}
+            >
+                <Icon name={icon} size={18} />
+                <span>{label}</span>
+            </button>
+        );
+
+        const StatCard = ({ label, value, icon, variant = "primary", index }) => (
+            <div className={`stat-card animate-slide delay-${(index % 3) + 1}`}>
+                <div className={`stat-icon ${variant}`}>
+                    <Icon name={icon} size={22} />
+                </div>
+                <div className="stat-info">
+                    <div className="label">{label}</div>
+                    <div className="value">{value}</div>
+                </div>
+            </div>
+        );
+
+        const AdminDashboard = () => {
+            const [token, setToken] = useState(localStorage.getItem('admin_token') || '');
+            const [password, setPassword] = useState('');
+            const [isLoggedIn, setIsLoggedIn] = useState(!!token);
+            const [currentPage, setCurrentPage] = useState('dashboard');
+            const [dashboard, setDashboard] = useState(null);
+            const [tenants, setTenants] = useState([]);
+            const [selectedTenant, setSelectedTenant] = useState(null);
+            const [loading, setLoading] = useState(false);
+            const [toasts, setToasts] = useState([]);
+
+            const [tenantForm, setTenantForm] = useState({
+                tenant_id: '', business_name: '', whatsapp_number: '',
+                odoo_url: '', odoo_db: '', odoo_user: '', odoo_password: '',
+                razorpay_key: '', razorpay_secret: '', n8n_webhook_url: '',
+            });
+
+            const showToast = useCallback((message, type = 'success') => {
+                const id = Date.now();
+                setToasts(prev => [...prev, { id, message, type }]);
+                setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000);
+            }, []);
+
+            const API = useMemo(() => {
+                const instance = axios.create({ baseURL: '/api/admin' });
+                instance.interceptors.request.use(config => {
+                    const currentToken = localStorage.getItem('admin_token');
+                    if (currentToken) {
+                        config.headers['Authorization'] = `Bearer ${currentToken}`;
+                        config.headers['authorization'] = `Bearer ${currentToken}`;
+                    }
+                    return config;
+                });
+                instance.interceptors.response.use(
+                    response => response,
+                    error => {
+                        if (error.response && error.response.status === 401) {
+                            handleLogout();
+                            showToast('Session expired. Please sign in again.', 'error');
+                        }
+                        return Promise.reject(error);
+                    }
+                );
+                return instance;
+            }, [showToast]);
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                try {
+                    const response = await axios.post('/api/admin/login', { password });
+                    const newToken = response.data.access_token;
+                    localStorage.setItem('admin_token', newToken);
+                    setToken(newToken);
+                    setIsLoggedIn(true);
+                    showToast('Welcome back!');
+                } catch (err) {
+                    showToast('Invalid credentials. Please try again.', 'error');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleLogout = useCallback(() => {
+                localStorage.removeItem('admin_token');
+                setToken('');
+                setIsLoggedIn(false);
+                setCurrentPage('dashboard');
+            }, []);
+
+            const fetchData = async () => {
+                if (!isLoggedIn) return;
+                setLoading(true);
+                try {
+                    const authHeader = { 'Authorization': `Bearer ${localStorage.getItem('admin_token')}` };
+                    if (currentPage === 'dashboard') {
+                        const res = await API.get('/dashboard', { headers: authHeader });
+                        setDashboard(res.data);
+                    } else if (currentPage === 'tenants') {
+                        const res = await API.get('/tenants', { params: { skip: 0, limit: 50 }, headers: authHeader });
+                        setTenants(res.data);
+                    }
+                } catch (err) {
+                    console.error('Fetch failed:', err);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            useEffect(() => { fetchData(); }, [isLoggedIn, currentPage, API]);
+
+            const handleCreateTenant = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                try {
+                    await API.post('/tenants', tenantForm);
+                    showToast('Client created successfully');
+                    setTenantForm({
+                        tenant_id: '', business_name: '', whatsapp_number: '',
+                        odoo_url: '', odoo_db: '', odoo_user: '', odoo_password: '',
+                        razorpay_key: '', razorpay_secret: '', n8n_webhook_url: '',
+                    });
+                    setCurrentPage('tenants');
+                } catch (err) {
+                    showToast(err.response?.data?.detail || 'Failed to create client', 'error');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleDeleteTenant = async (tenantId) => {
+                if (!window.confirm('Are you sure you want to remove this client? This action cannot be undone.')) return;
+                setLoading(true);
+                try {
+                    await API.delete(`/tenants/${tenantId}`);
+                    showToast('Client removed successfully');
+                    fetchData();
+                } catch (err) {
+                    showToast('Failed to remove client', 'error');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleFormChange = (e) => setTenantForm({ ...tenantForm, [e.target.name]: e.target.value });
+
+            if (!isLoggedIn) {
+                return (
+                    <div className="login-screen">
+                        <div className="toast-container">
+                            {toasts.map(t => <Toast key={t.id} {...t} />)}
+                        </div>
+                        <div className="login-card-v2 animate-scale">
+                            <div className="login-header">
+                                <div className="login-logo">
+                                    <div className="brand-icon">
+                                        <Icon name="building-2" size={20} />
+                                    </div>
+                                    <div>
+                                        <div className="brand-name" style={{ fontSize: '1.25rem' }}>RetailERP</div>
+                                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.05em' }}>ADMIN PORTAL</div>
+                                    </div>
+                                </div>
+                                <h1 className="outfit">Welcome back</h1>
+                                <p>Sign in to manage your client accounts</p>
+                            </div>
+                            <form className="login-form" onSubmit={handleLogin}>
+                                <div className="form-group">
+                                    <label>Admin Password</label>
+                                    <input
+                                        type="password"
+                                        placeholder="Enter your password"
+                                        value={password}
+                                        onChange={e => setPassword(e.target.value)}
+                                        required
+                                    />
+                                </div>
+                                <button type="submit" className="btn-primary" disabled={loading} style={{ width: '100%' }}>
+                                    {loading ? 'Signing in...' : 'Sign In'}
+                                    {!loading && <Icon name="arrow-right" size={18} />}
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="admin-layout animate-fade">
+                    <div className="toast-container">
+                        {toasts.map(t => <Toast key={t.id} {...t} />)}
+                    </div>
+
+                    <aside className="sidebar">
+                        <div className="sidebar-header">
+                            <div className="brand">
+                                <div className="brand-icon">
+                                    <Icon name="building-2" size={18} />
+                                </div>
+                                <div>
+                                    <div className="brand-name outfit">RetailERP</div>
+                                    <div className="brand-tagline">Admin Portal</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <nav className="nav-menu">
+                            <span className="nav-group-label">Main</span>
+                            <SidebarItem id="dashboard" label="Dashboard" icon="layout-dashboard"
+                                active={currentPage === 'dashboard'} onClick={setCurrentPage} />
+                            <SidebarItem id="tenants" label="Clients" icon="briefcase"
+                                active={currentPage === 'tenants' || currentPage === 'tenant-detail'} onClick={setCurrentPage} />
+                            <span className="nav-group-label">Actions</span>
+                            <SidebarItem id="create" label="Add Client" icon="plus-circle"
+                                active={currentPage === 'create'} onClick={setCurrentPage} />
+                        </nav>
+
+                        <div className="sidebar-footer">
+                            <button className="logout-btn" onClick={handleLogout}>
+                                <Icon name="log-out" size={18} />
+                                <span>Sign Out</span>
+                            </button>
+                        </div>
+                    </aside>
+
+                    <main className="main-content">
+                        <header className="content-header">
+                            <div className="page-title">
+                                <h2 className="outfit">
+                                    {currentPage === 'dashboard' && 'Dashboard'}
+                                    {currentPage === 'tenants' && 'Client Management'}
+                                    {currentPage === 'create' && 'Add New Client'}
+                                    {currentPage === 'tenant-detail' && 'Client Details'}
+                                </h2>
+                            </div>
+                            <div className="header-actions">
+                                <button className="btn-icon" title="Notifications">
+                                    <Icon name="bell" size={18} />
+                                </button>
+                                <button className="btn-icon" title="Refresh" onClick={fetchData}>
+                                    <Icon name="refresh-cw" size={18} />
+                                </button>
+                            </div>
+                        </header>
+
+                        <div className="page-body">
+                            <div className="animate-slide">
+                                {currentPage === 'dashboard' && dashboard && (
+                                    <div className="dashboard-content">
+                                        <div className="dashboard-grid">
+                                            <StatCard index={0} label="Active Clients" value={dashboard.total_tenants} icon="briefcase" variant="primary" />
+                                            <StatCard index={1} label="Total Orders" value={dashboard.total_orders} icon="shopping-bag" variant="secondary" />
+                                            <StatCard index={2} label="Total Products" value={dashboard.total_products} icon="package" variant="accent" />
+                                            <StatCard index={3} label="Total Revenue" value={`₹${dashboard.total_revenue.toLocaleString()}`} icon="trending-up" variant="success" />
+                                        </div>
+
+                                        <div className="form-card animate-slide delay-1" style={{ maxWidth: '100%' }}>
+                                            <div className="form-header">
+                                                <h3 className="outfit">System Status</h3>
+                                                <p>Real-time platform health across all client accounts</p>
+                                            </div>
+                                            <div style={{ padding: '3rem', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
+                                                <div style={{ textAlign: 'center' }}>
+                                                    <Icon name="activity" size={40} className="animate-fade" />
+                                                    <p style={{ marginTop: '1rem', fontSize: '0.9375rem' }}>All systems operational</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {currentPage === 'tenants' && (
+                                    <div className="tenants-view animate-slide">
+                                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1.25rem' }}>
+                                            <button className="btn-primary" onClick={() => setCurrentPage('create')}>
+                                                <Icon name="plus" size={18} />
+                                                Add Client
+                                            </button>
+                                        </div>
+                                        <div className="table-container">
+                                            <div className="data-table-wrapper">
+                                                <table className="data-table">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>Business</th>
+                                                            <th>Contact / URL</th>
+                                                            <th>Database</th>
+                                                            <th>Status</th>
+                                                            <th>Actions</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {tenants.map((t, idx) => (
+                                                            <tr key={t.id} className={`animate-fade delay-${(idx % 3) + 1}`}>
+                                                                <td>
+                                                                    <div style={{ fontWeight: 600, marginBottom: '0.125rem' }}>{t.business_name}</div>
+                                                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{t.tenant_id}</div>
+                                                                </td>
+                                                                <td>
+                                                                    <div style={{ fontSize: '0.875rem', fontWeight: 500 }}>{t.whatsapp_number}</div>
+                                                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t.odoo_url}</div>
+                                                                </td>
+                                                                <td>
+                                                                    <span className="badge badge-primary" style={{ fontFamily: 'monospace', fontSize: '0.75rem' }}>{t.odoo_db}</span>
+                                                                </td>
+                                                                <td>
+                                                                    <span className="badge badge-success">Active</span>
+                                                                </td>
+                                                                <td>
+                                                                    <div className="btn-icon-group">
+                                                                        <button className="btn-icon" title="View Details" onClick={() => { setSelectedTenant(t); setCurrentPage('tenant-detail'); }}>
+                                                                            <Icon name="eye" size={16} />
+                                                                        </button>
+                                                                        <button className="btn-icon delete" title="Remove Client" onClick={() => handleDeleteTenant(t.tenant_id)}>
+                                                                            <Icon name="trash-2" size={16} />
+                                                                        </button>
+                                                                    </div>
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                            {tenants.length === 0 && !loading && (
+                                                <div style={{ padding: '5rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                                                    <Icon name="briefcase" size={40} style={{ marginBottom: '1rem', opacity: 0.4 }} />
+                                                    <p style={{ fontWeight: 500 }}>No clients found</p>
+                                                    <p style={{ fontSize: '0.875rem', marginTop: '0.5rem' }}>Add your first client to get started</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {currentPage === 'create' && (
+                                    <div className="form-card animate-scale">
+                                        <div className="form-header">
+                                            <h3 className="outfit">Register New Client</h3>
+                                            <p>Set up a new client account with ERP and payment integration</p>
+                                        </div>
+                                        <form onSubmit={handleCreateTenant} className="form-grid">
+                                            <div className="form-section-title" style={{ gridColumn: 'span 2' }}>Account Information</div>
+                                            <div className="form-group">
+                                                <label>Client ID *</label>
+                                                <input name="tenant_id" value={tenantForm.tenant_id} onChange={handleFormChange} required placeholder="e.g. acme-retail" />
+                                            </div>
+                                            <div className="form-group">
+                                                <label>Business Name *</label>
+                                                <input name="business_name" value={tenantForm.business_name} onChange={handleFormChange} required placeholder="Acme Retail Pvt. Ltd." />
+                                            </div>
+                                            <div className="form-group">
+                                                <label>WhatsApp Number *</label>
+                                                <input name="whatsapp_number" value={tenantForm.whatsapp_number} onChange={handleFormChange} required placeholder="91XXXXXXXXXX" />
+                                            </div>
+                                            <div className="form-group full-width">
+                                                <div className="form-section-title">Odoo ERP Connection</div>
+                                            </div>
+                                            <div className="form-group">
+                                                <label>Odoo URL *</label>
+                                                <input name="odoo_url" value={tenantForm.odoo_url} onChange={handleFormChange} required placeholder="https://erp.acme.com" />
+                                            </div>
+                                            <div className="form-group">
+                                                <label>Database Name *</label>
+                                                <input name="odoo_db" value={tenantForm.odoo_db} onChange={handleFormChange} required placeholder="acme_production" />
+                                            </div>
+                                            <div className="form-group">
+                                                <label>Odoo Username *</label>
+                                                <input name="odoo_user" value={tenantForm.odoo_user} onChange={handleFormChange} required placeholder="admin" />
+                                            </div>
+                                            <div className="form-group">
+                                                <label>Odoo Password *</label>
+                                                <input type="password" name="odoo_password" value={tenantForm.odoo_password} onChange={handleFormChange} required />
+                                            </div>
+                                            <div className="form-group full-width">
+                                                <div className="form-section-title">Payment & Workflow</div>
+                                            </div>
+                                            <div className="form-group">
+                                                <label>Razorpay Key *</label>
+                                                <input name="razorpay_key" value={tenantForm.razorpay_key} onChange={handleFormChange} required />
+                                            </div>
+                                            <div className="form-group">
+                                                <label>Razorpay Secret *</label>
+                                                <input type="password" name="razorpay_secret" value={tenantForm.razorpay_secret} onChange={handleFormChange} required />
+                                            </div>
+                                            <div className="form-group">
+                                                <label>n8n Webhook URL</label>
+                                                <input name="n8n_webhook_url" value={tenantForm.n8n_webhook_url} onChange={handleFormChange} placeholder="https://n8n.cloud/webhook/..." />
+                                            </div>
+                                            <div className="form-group full-width" style={{ marginTop: '0.5rem' }}>
+                                                <button type="submit" className="btn-primary" disabled={loading} style={{ width: '100%' }}>
+                                                    {loading ? 'Creating Client...' : 'Create Client'}
+                                                    {!loading && <Icon name="check" size={18} />}
+                                                </button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                )}
+
+                                {currentPage === 'tenant-detail' && selectedTenant && (
+                                    <div className="detail-view animate-fade">
+                                        <div className="detail-header">
+                                            <button className="btn-secondary" onClick={() => setCurrentPage('tenants')}>
+                                                <Icon name="chevron-left" size={18} />
+                                                Back
+                                            </button>
+                                            <div style={{ flex: 1 }}>
+                                                <h1 className="outfit" style={{ fontSize: '1.75rem', letterSpacing: '-0.02em', marginBottom: '0.25rem' }}>{selectedTenant.business_name}</h1>
+                                                <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', fontFamily: 'monospace' }}>Client ID: {selectedTenant.tenant_id}</p>
+                                            </div>
+                                            <button
+                                                className="btn-primary"
+                                                onClick={async () => {
+                                                    setLoading(true);
+                                                    try {
+                                                        await API.put(`/tenants/${selectedTenant.tenant_id}`, selectedTenant);
+                                                        showToast('Client updated successfully');
+                                                    } catch (err) {
+                                                        showToast('Update failed', 'error');
+                                                    } finally {
+                                                        setLoading(false);
+                                                    }
+                                                }}
+                                                disabled={loading}
+                                            >
+                                                <Icon name="save" size={18} />
+                                                Save Changes
+                                            </button>
+                                        </div>
+
+                                        <div className="detail-grid">
+                                            <div className="form-card" style={{ margin: 0 }}>
+                                                <div className="form-header">
+                                                    <h3 className="outfit">ERP Connection</h3>
+                                                    <p>Odoo ERP integration settings</p>
+                                                </div>
+                                                <div>
+                                                    <div className="form-group">
+                                                        <label>Odoo URL</label>
+                                                        <input value={selectedTenant.odoo_url} onChange={e => setSelectedTenant({ ...selectedTenant, odoo_url: e.target.value })} />
+                                                    </div>
+                                                    <div className="form-group">
+                                                        <label>Database Name</label>
+                                                        <input value={selectedTenant.odoo_db} onChange={e => setSelectedTenant({ ...selectedTenant, odoo_db: e.target.value })} />
+                                                    </div>
+                                                    <div className="form-group">
+                                                        <label>Username</label>
+                                                        <input value={selectedTenant.odoo_user} onChange={e => setSelectedTenant({ ...selectedTenant, odoo_user: e.target.value })} />
+                                                    </div>
+                                                    <div className="form-group">
+                                                        <label>Password</label>
+                                                        <input type="password" value={selectedTenant.odoo_password} onChange={e => setSelectedTenant({ ...selectedTenant, odoo_password: e.target.value })} />
+                                                    </div>
+                                                    <button
+                                                        className="btn-secondary"
+                                                        style={{ width: '100%' }}
+                                                        disabled={loading}
+                                                        onClick={async () => {
+                                                            setLoading(true);
+                                                            try {
+                                                                const res = await API.post(`/tenants/${selectedTenant.tenant_id}/test-odoo`);
+                                                                if (res.data.status === 'success') {
+                                                                    showToast(res.data.message, 'success');
+                                                                } else {
+                                                                    showToast(res.data.message, 'error');
+                                                                }
+                                                            } catch (err) {
+                                                                showToast('Connection test failed', 'error');
+                                                            } finally {
+                                                                setLoading(false);
+                                                            }
+                                                        }}
+                                                    >
+                                                        <Icon name="zap" size={16} />
+                                                        Test Connection
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            <div className="form-card" style={{ margin: 0 }}>
+                                                <div className="form-header">
+                                                    <h3 className="outfit">Integrations</h3>
+                                                    <p>WhatsApp and payment gateway settings</p>
+                                                </div>
+                                                <div>
+                                                    <div className="form-group">
+                                                        <label>WhatsApp Number</label>
+                                                        <input value={selectedTenant.whatsapp_number} onChange={e => setSelectedTenant({ ...selectedTenant, whatsapp_number: e.target.value })} />
+                                                    </div>
+                                                    <div className="form-group">
+                                                        <label>Razorpay Key</label>
+                                                        <input value={selectedTenant.razorpay_key} onChange={e => setSelectedTenant({ ...selectedTenant, razorpay_key: e.target.value })} />
+                                                    </div>
+                                                    <div className="form-group">
+                                                        <label>Razorpay Secret</label>
+                                                        <input type="password" value={selectedTenant.razorpay_secret} onChange={e => setSelectedTenant({ ...selectedTenant, razorpay_secret: e.target.value })} />
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="form-card" style={{ margin: 0 }}>
+                                                <div className="form-header">
+                                                    <h3 className="outfit">Branding</h3>
+                                                    <p>Custom branding and white-label settings</p>
+                                                </div>
+                                                <div>
+                                                    <div className="form-group">
+                                                        <label>Primary Color</label>
+                                                        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                                                            <input
+                                                                type="color"
+                                                                value={selectedTenant.primary_color || '#0d9488'}
+                                                                onChange={e => setSelectedTenant({ ...selectedTenant, primary_color: e.target.value })}
+                                                                style={{ width: '44px', height: '44px', padding: '0', border: 'none', background: 'none', cursor: 'pointer' }}
+                                                            />
+                                                            <input
+                                                                type="text"
+                                                                value={selectedTenant.primary_color || '#0d9488'}
+                                                                onChange={e => setSelectedTenant({ ...selectedTenant, primary_color: e.target.value })}
+                                                                placeholder="#0d9488"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                    <div className="form-group">
+                                                        <label>Logo URL</label>
+                                                        <input
+                                                            value={selectedTenant.logo_url || ''}
+                                                            onChange={e => setSelectedTenant({ ...selectedTenant, logo_url: e.target.value })}
+                                                            placeholder="https://assets.example.com/logo.png"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </main>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<AdminDashboard />);
+    </script>
+</body>
+
+</html>

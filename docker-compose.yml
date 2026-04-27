@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+
+  redis:
+    image: redis:7-alpine
+    container_name: odoo_saas_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_PORT:-6380}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  odoo:
+    build:
+      context: .
+      dockerfile: Dockerfile.odoo
+    image: odoo-saas-custom:latest
+    container_name: odoo_saas_odoo
+    restart: unless-stopped
+    environment:
+      HOST: postgres-app
+      USER: odoo_user
+      PASSWORD: odoo_password
+      ODOO_DB_NAME: app_db
+      ODOO_MASTER_PASS: admin_password
+    ports:
+      - "${ODOO_PORT:-8069}:8069"
+    volumes:
+      - odoo_data:/var/lib/odoo
+      - ./odoo_addons:/mnt/extra-addons
+
+  fastapi:
+    build: .
+    container_name: odoo_saas_fastapi
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    ports:
+      - "${FASTAPI_PORT:-9000}:8000"
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  celery_worker:
+    build: .
+    container_name: odoo_saas_celery
+    command: celery -A app.core.celery_app worker --loglevel=info
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+
+volumes:
+  redis_data:
+  odoo_data:
+
+networks:
+  default:
+    external: true
+    name: astro-app_default
