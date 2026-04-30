@@ -1,6 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Header
+from fastapi import APIRouter, Depends, HTTPException, status, Header, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from typing import Optional, List
+from pydantic import BaseModel
 from app.core.database import get_db
 from app.models.tenant import Tenant
 from app.models.order import Order
@@ -293,3 +295,162 @@ async def get_tenant_metrics(
         total_revenue=float(total_revenue),
         total_products=total_products,
     )
+
+
+# ─── Supplier Email Notification Management ────────────────────────────────────
+
+class SupplierEmailSettingsResponse(BaseModel):
+    tenant_id: str
+    is_enabled: bool
+    cooldown_hours: int
+    updated_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+
+class SupplierEmailSettingsUpdate(BaseModel):
+    is_enabled: Optional[bool] = None
+    cooldown_hours: Optional[int] = None
+
+
+class SupplierNotificationResponse(BaseModel):
+    id: int
+    tenant_id: str
+    alert_id: Optional[int]
+    recipient: str
+    notification_type: str
+    channel: str
+    status: str
+    sent_at: Optional[datetime]
+    retries: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+@router.get("/tenants/{tenant_id}/supplier-email-settings", response_model=SupplierEmailSettingsResponse)
+async def get_supplier_email_settings(
+    tenant_id: str,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Get supplier email notification settings for a tenant."""
+    verify_admin_token(authorization)
+    from app.models.procurement import SupplierEmailSettings
+
+    settings_obj = db.query(SupplierEmailSettings).filter(
+        SupplierEmailSettings.tenant_id == tenant_id
+    ).first()
+
+    if not settings_obj:
+        # Return defaults if not yet configured
+        return SupplierEmailSettingsResponse(
+            tenant_id=tenant_id,
+            is_enabled=True,
+            cooldown_hours=24,
+            updated_at=None,
+        )
+
+    return settings_obj
+
+
+@router.put("/tenants/{tenant_id}/supplier-email-settings", response_model=SupplierEmailSettingsResponse)
+async def update_supplier_email_settings(
+    tenant_id: str,
+    body: SupplierEmailSettingsUpdate,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db),
+):
+    """
+    Update supplier email notification settings.
+    - is_enabled: false pauses all outgoing supplier emails for this tenant
+    - cooldown_hours: minimum hours between emails to the same supplier for the same product
+    """
+    verify_admin_token(authorization)
+    from app.models.procurement import SupplierEmailSettings
+
+    tenant = db.query(Tenant).filter(Tenant.tenant_id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
+
+    settings_obj = db.query(SupplierEmailSettings).filter(
+        SupplierEmailSettings.tenant_id == tenant_id
+    ).first()
+
+    if not settings_obj:
+        settings_obj = SupplierEmailSettings(tenant_id=tenant_id)
+        db.add(settings_obj)
+
+    if body.is_enabled is not None:
+        settings_obj.is_enabled = body.is_enabled
+    if body.cooldown_hours is not None:
+        if body.cooldown_hours < 1:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="cooldown_hours must be >= 1")
+        settings_obj.cooldown_hours = body.cooldown_hours
+
+    db.commit()
+    db.refresh(settings_obj)
+    return settings_obj
+
+
+@router.get("/tenants/{tenant_id}/supplier-notifications", response_model=List[SupplierNotificationResponse])
+async def list_supplier_notifications(
+    tenant_id: str,
+    status_filter: Optional[str] = Query(None, alias="status", description="pending | sent | failed"),
+    supplier_email: Optional[str] = Query(None),
+    skip: int = 0,
+    limit: int = 50,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db),
+):
+    """List supplier email notifications for a tenant with optional filters."""
+    verify_admin_token(authorization)
+    from app.models.inventory import InventoryNotification
+
+    query = db.query(InventoryNotification).filter(
+        InventoryNotification.tenant_id == tenant_id,
+        InventoryNotification.channel == "email",
+    )
+
+    if status_filter:
+        query = query.filter(InventoryNotification.status == status_filter)
+    if supplier_email:
+        query = query.filter(InventoryNotification.recipient == supplier_email)
+
+    return query.order_by(InventoryNotification.created_at.desc()).offset(skip).limit(limit).all()
+
+
+@router.delete("/tenants/{tenant_id}/supplier-notifications/{notification_id}")
+async def cancel_supplier_notification(
+    tenant_id: str,
+    notification_id: int,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db),
+):
+    """
+    Cancel a pending supplier email notification so it won't be sent.
+    Only pending notifications can be cancelled.
+    """
+    verify_admin_token(authorization)
+    from app.models.inventory import InventoryNotification
+
+    notif = db.query(InventoryNotification).filter(
+        InventoryNotification.id == notification_id,
+        InventoryNotification.tenant_id == tenant_id,
+        InventoryNotification.channel == "email",
+    ).first()
+
+    if not notif:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found")
+
+    if notif.status != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot cancel a notification with status '{notif.status}'"
+        )
+
+    notif.status = "failed"
+    db.commit()
+    return {"message": "Notification cancelled successfully", "id": notification_id}

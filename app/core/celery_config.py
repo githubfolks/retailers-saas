@@ -28,6 +28,13 @@ app.conf.beat_schedule = {
         'schedule': crontab(minute='*/5'),
         'args': ('tenant_id',),
     },
+
+    # Queue supplier email alerts for low stock (runs after check-low-stock)
+    'notify-suppliers-low-stock': {
+        'task': 'app.tasks.inventory_tasks.notify_suppliers_low_stock',
+        'schedule': crontab(minute=5),  # 5 min after check-low-stock fires at :00
+        'args': ('tenant_id',),
+    },
     
     # Generate demand forecasts daily at 2 AM
     'generate-forecasts': {
@@ -85,6 +92,7 @@ def register_tenant_tasks():
                 sync_stock_from_odoo,
                 check_low_stock_alerts,
                 send_pending_notifications,
+                notify_suppliers_low_stock,
                 generate_demand_forecasts,
                 generate_reorder_suggestions
             )

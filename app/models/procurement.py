@@ -162,6 +162,17 @@ class AutomationWorkflow(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class SupplierEmailSettings(Base):
+    """Per-tenant configuration for automated supplier email notifications."""
+    __tablename__ = "supplier_email_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(String, ForeignKey("tenants.tenant_id"), unique=True, index=True)
+    is_enabled = Column(Boolean, default=True)
+    cooldown_hours = Column(Integer, default=24)  # Min hours between emails to same supplier/product
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class InventoryCount(Base):
     __tablename__ = "inventory_counts"
 

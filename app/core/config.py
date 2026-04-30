@@ -26,6 +26,14 @@ class Settings(BaseSettings):
     alert_check_interval_minutes: int = 60
     notification_send_interval_minutes: int = 5
     
+    # SMTP Email Settings
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_from_name: str = "Inventory System"
+
     # Ports
     fastapi_port: int = 9000
     redis_port: int = 6380

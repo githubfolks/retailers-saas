@@ -129,11 +129,12 @@ def check_low_stock_alerts(self, tenant_id: str):
 
 @shared_task(bind=True, max_retries=3)
 def send_pending_notifications(self, tenant_id: str):
-    """Send pending inventory notifications."""
+    """Send pending inventory notifications via WhatsApp or email based on channel."""
     with get_task_db() as db:
         try:
             from app.models.inventory import InventoryNotification
             from app.integrations.whatsapp_sender import send_whatsapp_message
+            from app.integrations.email_sender import send_email
 
             tenant = db.query(Tenant).filter(Tenant.tenant_id == tenant_id).first()
             if not tenant:
@@ -147,13 +148,23 @@ def send_pending_notifications(self, tenant_id: str):
             sent = 0
             now = datetime.utcnow()
             for notif in pending_notifs:
-                result = send_whatsapp_message(
-                    recipient_number=notif.recipient,
-                    message_text=notif.message,
-                    phone_number_id=getattr(tenant, 'whatsapp_phone_id', None),
-                    whatsapp_token=getattr(tenant, 'whatsapp_token', None)
-                )
-                if result:
+                if notif.channel == "email":
+                    success = send_email(
+                        to_email=notif.recipient,
+                        subject="Low Stock Alert — Action Required",
+                        html_body=notif.message,
+                        plain_body=notif.message,
+                    )
+                else:
+                    result = send_whatsapp_message(
+                        recipient_number=notif.recipient,
+                        message_text=notif.message,
+                        phone_number_id=getattr(tenant, 'whatsapp_phone_id', None),
+                        whatsapp_token=getattr(tenant, 'whatsapp_token', None)
+                    )
+                    success = result is not None
+
+                if success:
                     notif.status = "sent"
                     notif.sent_at = now
                     sent += 1
@@ -168,6 +179,134 @@ def send_pending_notifications(self, tenant_id: str):
 
         except Exception as exc:
             request_logger.error(f"Notification send error: {str(exc)}")
+            raise self.retry(exc=exc, countdown=60)
+
+
+@shared_task(bind=True, max_retries=3)
+def notify_suppliers_low_stock(self, tenant_id: str):
+    """Queue email notifications to suppliers when their products hit low stock."""
+    with get_task_db() as db:
+        try:
+            from app.models.inventory import InventoryNotification, StockAlert
+            from app.models.procurement import (
+                PurchaseOrder, PurchaseOrderLine, Supplier, SupplierEmailSettings,
+            )
+            from app.integrations.email_sender import build_low_stock_email
+
+            tenant = db.query(Tenant).filter(Tenant.tenant_id == tenant_id).first()
+            if not tenant:
+                return {"status": "error", "message": "Tenant not found"}
+
+            email_settings = db.query(SupplierEmailSettings).filter(
+                SupplierEmailSettings.tenant_id == tenant_id
+            ).first()
+
+            # Respect per-tenant on/off toggle (default enabled if not configured yet)
+            if email_settings and not email_settings.is_enabled:
+                request_logger.info(f"Supplier email notifications disabled for {tenant_id}")
+                return {"status": "skipped", "reason": "notifications disabled"}
+
+            cooldown_hours = email_settings.cooldown_hours if email_settings else 24
+            cooldown_cutoff = datetime.utcnow() - timedelta(hours=cooldown_hours)
+
+            # Active alerts that don't already have a pending/sent email notification
+            notified_alert_ids = {
+                row[0] for row in db.query(InventoryNotification.alert_id).filter(
+                    InventoryNotification.tenant_id == tenant_id,
+                    InventoryNotification.channel == "email",
+                    InventoryNotification.status.in_(["pending", "sent"]),
+                    InventoryNotification.alert_id.isnot(None),
+                ).all()
+            }
+
+            active_alerts = db.query(StockAlert).filter(
+                StockAlert.tenant_id == tenant_id,
+                StockAlert.status == "active",
+                StockAlert.alert_type.in_(["low_stock", "out_of_stock"]),
+            ).all()
+
+            queued = 0
+            new_notifications = []
+            for alert in active_alerts:
+                if alert.id in notified_alert_ids:
+                    continue
+
+                # Find the most recent supplier with an email for this product
+                supplier = (
+                    db.query(Supplier)
+                    .join(PurchaseOrder, PurchaseOrder.supplier_id == Supplier.id)
+                    .join(PurchaseOrderLine, PurchaseOrderLine.po_id == PurchaseOrder.id)
+                    .filter(
+                        PurchaseOrder.tenant_id == tenant_id,
+                        PurchaseOrderLine.product_id == alert.product_id,
+                        Supplier.email.isnot(None),
+                        Supplier.is_active == True,
+                    )
+                    .order_by(PurchaseOrder.po_date.desc())
+                    .first()
+                )
+
+                if not supplier:
+                    request_logger.info(
+                        f"No supplier with email found for product_id={alert.product_id}, skipping"
+                    )
+                    continue
+
+                # Cooldown: skip if this supplier already got an email for this product recently
+                recent_sent = db.query(InventoryNotification).join(
+                    StockAlert, StockAlert.id == InventoryNotification.alert_id
+                ).filter(
+                    InventoryNotification.tenant_id == tenant_id,
+                    InventoryNotification.channel == "email",
+                    InventoryNotification.status == "sent",
+                    InventoryNotification.recipient == supplier.email,
+                    StockAlert.product_id == alert.product_id,
+                    InventoryNotification.sent_at > cooldown_cutoff,
+                ).first()
+
+                if recent_sent:
+                    request_logger.info(
+                        f"Cooldown active for supplier {supplier.email} / product_id={alert.product_id}, skipping"
+                    )
+                    continue
+
+                product = db.query(Product).filter(Product.id == alert.product_id).first()
+                product_name = product.name if product else f"Product #{alert.product_id}"
+
+                location = db.query(StockLocation).filter(
+                    StockLocation.tenant_id == tenant_id,
+                    StockLocation.product_id == alert.product_id,
+                ).first()
+                reorder_qty = location.reorder_quantity if location else 50
+
+                subject, html_body, plain_body = build_low_stock_email(
+                    product_name=product_name,
+                    current_qty=alert.current_value,
+                    reorder_point=alert.threshold_value,
+                    reorder_qty=reorder_qty,
+                    tenant_name=tenant.business_name,
+                )
+
+                new_notifications.append(InventoryNotification(
+                    tenant_id=tenant_id,
+                    alert_id=alert.id,
+                    recipient=supplier.email,
+                    notification_type=alert.alert_type,
+                    channel="email",
+                    message=html_body,
+                    status="pending",
+                ))
+                queued += 1
+
+            if new_notifications:
+                db.bulk_save_objects(new_notifications)
+            db.commit()
+
+            request_logger.info(f"Queued {queued} supplier email notifications for {tenant_id}")
+            return {"status": "success", "queued": queued}
+
+        except Exception as exc:
+            request_logger.error(f"Supplier notification error: {str(exc)}")
             raise self.retry(exc=exc, countdown=60)
 
 
