@@ -62,18 +62,22 @@ class ProcurementService:
     def create_purchase_order(self, supplier_id: int, expected_delivery: datetime,
                             lines: List[Dict]) -> int:
         """Create a purchase order."""
+        import uuid as _uuid
         po = PurchaseOrder(
             tenant_id=self.tenant_id,
             supplier_id=supplier_id,
-            po_number=f"PO-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
+            po_number=f"PO-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}-{_uuid.uuid4().hex[:6]}",
             expected_delivery=expected_delivery,
             po_status="draft"
         )
-        
+        self.db.add(po)
+        self.db.flush()  # get po.id before creating lines
+
         total_amount = 0
         for line in lines:
             po_line = PurchaseOrderLine(
                 tenant_id=self.tenant_id,
+                po_id=po.id,
                 product_id=line.get("product_id"),
                 product_name=line.get("product_name", ""),
                 quantity=line.get("quantity"),
@@ -82,9 +86,8 @@ class ProcurementService:
             )
             total_amount += po_line.total_cost
             self.db.add(po_line)
-        
+
         po.total_amount = total_amount
-        self.db.add(po)
         self.db.commit()
         
         return po.id

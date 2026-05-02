@@ -47,11 +47,9 @@ async def create_coupon(
     if existing:
         raise HTTPException(status_code=400, detail="Coupon code already exists")
     
-    new_coupon = Coupon(
-        tenant_id=current_tenant_id,
-        code=coupon_data.code.upper(),
-        **coupon_data.dict()
-    )
+    coupon_dict = coupon_data.dict()
+    coupon_dict["code"] = coupon_data.code.upper()
+    new_coupon = Coupon(tenant_id=current_tenant_id, **coupon_dict)
     
     db.add(new_coupon)
     db.commit()
