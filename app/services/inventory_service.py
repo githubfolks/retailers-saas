@@ -182,10 +182,10 @@ class InventoryService:
                 from app.services.whatsapp_bot_service import WhatsAppBotService
                 from app.models.tenant import Tenant
                 tenant = db.query(Tenant).filter(Tenant.tenant_id == tenant_id).first()
-                if tenant and tenant.owner_phone:
+                if tenant and tenant.whatsapp_number:
                     import asyncio
                     asyncio.create_task(WhatsAppBotService.send_stock_alert(
-                        tenant, tenant.owner_phone, f"PROD-{product_id}", location.available_quantity
+                        tenant, tenant.whatsapp_number, f"PROD-{product_id}", location.available_quantity
                     ))
             
         # 3. Log Movement
