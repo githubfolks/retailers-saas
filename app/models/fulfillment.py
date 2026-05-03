@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text
 from datetime import datetime
 from app.core.database import Base
 
@@ -26,6 +26,10 @@ class Fulfillment(Base):
     shipped_at = Column(DateTime, nullable=True)
     delivered_at = Column(DateTime, nullable=True)
     
+    # Provider metadata
+    provider_shipment_id = Column(String, nullable=True)
+    shipping_cost = Column(Float, nullable=True)
+
     # Notes/Audit
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

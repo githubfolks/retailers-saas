@@ -62,6 +62,8 @@ class FulfillmentResponse(BaseModel):
     id: int
     carrier_name: Optional[str]
     tracking_number: Optional[str]
+    shipping_label_url: Optional[str]
+    shipping_cost: Optional[float]
     status: str
     created_at: datetime
 
@@ -859,4 +861,34 @@ async def fulfill_order(
         ))
     
     db.commit()
+    return fulfillment
+
+
+@router.post("/{order_id}/auto-fulfill", response_model=FulfillmentResponse)
+async def auto_fulfill_order(
+    order_id: int,
+    logistics_partner_id: int,
+    current_tenant_id: str = Depends(get_current_tenant_id),
+    db: Session = Depends(get_db)
+):
+    """Auto-assign AWB via a configured logistics provider (e.g. Shiprocket)."""
+    from app.services.logistics_service import auto_assign_awb
+
+    try:
+        fulfillment = await auto_assign_awb(order_id, logistics_partner_id, current_tenant_id, db)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Logistics provider error: {str(e)}")
+
+    order = db.query(Order).filter(Order.id == order_id, Order.tenant_id == current_tenant_id).first()
+    if order and order.customer_mobile:
+        from app.services.whatsapp_bot_service import WhatsAppBotService
+        tenant = db.query(Tenant).filter(Tenant.tenant_id == current_tenant_id).first()
+        if tenant:
+            import asyncio
+            asyncio.create_task(WhatsAppBotService.send_dispatch_notification(
+                tenant, order.customer_mobile, order_id, fulfillment.tracking_number
+            ))
+
     return fulfillment

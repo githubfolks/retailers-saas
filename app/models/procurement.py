@@ -212,3 +212,20 @@ class ProductBarcode(Base):
     barcode_type = Column(String)  # EAN-13, UPC, QR, CODE128
     is_primary = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class LogisticsPartner(Base):
+    __tablename__ = "logistics_partners"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(String, ForeignKey("tenants.tenant_id"), index=True)
+    name = Column(String, index=True)
+    provider_type = Column(String, default="manual")  # manual | shiprocket | delhivery
+    api_email = Column(String, nullable=True)
+    api_password = Column(String, nullable=True)
+    pickup_location_name = Column(String, nullable=True)  # Shiprocket pickup location label
+    tracking_url_template = Column(String, nullable=True)  # e.g. https://courier.com/track/{awb}
+    contact_phone = Column(String, nullable=True)
+    contact_email = Column(String, nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)

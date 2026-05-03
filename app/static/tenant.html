@@ -256,6 +256,7 @@
             const [suggestions, setSuggestions] = useState([]);
             const [suppliers, setSuppliers] = useState([]);
             const [purchaseOrders, setPurchaseOrders] = useState([]);
+            const [logisticsPartners, setLogisticsPartners] = useState([]);
             const [aiBriefing, setAiBriefing] = useState("");
             const [selectedOrder, setSelectedOrder] = useState(null);
             const [invoiceData, setInvoiceData] = useState(null);
@@ -389,8 +390,8 @@
                             res => setUnits(res.data)
                         );
                     } else if (currentPage === 'orders') {
-                        requests.push(API.get('/orders/'));
-                        handlers.push(res => setOrders(res.data));
+                        requests.push(API.get('/orders/'), API.get('/procurement/logistics-partners'));
+                        handlers.push(res => setOrders(res.data), res => setLogisticsPartners(res.data));
                     } else if (currentPage === 'pos') {
                         requests.push(API.get('/products/'), API.get('/orders/pos-summary'));
                         handlers.push(
@@ -416,10 +417,11 @@
                         requests.push(API.get('/customers/'));
                         handlers.push(res => setCustomers(res.data));
                     } else if (currentPage === 'partners') {
-                        requests.push(API.get('/procurement/suppliers'), API.get('/customers/'));
+                        requests.push(API.get('/procurement/suppliers'), API.get('/customers/'), API.get('/procurement/logistics-partners'));
                         handlers.push(
                             res => setSuppliers(res.data),
-                            res => setCustomers(res.data)
+                            res => setCustomers(res.data),
+                            res => setLogisticsPartners(res.data)
                         );
                     } else if (currentPage === 'coupons') {
                         requests.push(API.get('/coupons/'));
@@ -641,7 +643,7 @@
                 token, tenantId, userRole, settings, setSettings,
                 summary, orders, products, customers, financials,
                 selectedCustomer, setSelectedCustomer,
-                alerts, forecasts, suggestions, suppliers, purchaseOrders, aiBriefing,
+                alerts, forecasts, suggestions, suppliers, purchaseOrders, logisticsPartners, setLogisticsPartners, aiBriefing,
                 selectedOrder, setSelectedOrder, invoiceData, setInvoiceData,
                 showInvoice, setShowInvoice, showScanner, setShowScanner,
                 showCouponModal, setShowCouponModal, showFulfill, setShowFulfill,
@@ -880,7 +882,27 @@
                     )}
 
                     {/* FULFILLMENT MODAL */}
-                    {showFulfill && selectedOrder && (
+                    {showFulfill && selectedOrder && (() => {
+                        const selectedLp = logisticsPartners.find(lp => lp.name === fulfillmentForm.carrier);
+                        const canAutoAwb = selectedLp && selectedLp.provider_type !== 'manual';
+
+                        const autoAssignAwb = async () => {
+                            if (!selectedLp) return;
+                            setLoading(true);
+                            try {
+                                const res = await API.post(`/orders/${selectedOrder.id}/auto-fulfill?logistics_partner_id=${selectedLp.id}`);
+                                showToast(`AWB assigned: ${res.data.tracking_number}`);
+                                setShowFulfill(false);
+                                fetchData();
+                            } catch (err) {
+                                const msg = err?.response?.data?.detail || 'Auto-assign failed';
+                                showToast(msg, 'error');
+                            } finally {
+                                setLoading(false);
+                            }
+                        };
+
+                        return (
                         <div className="modal-overlay" onClick={() => setShowFulfill(false)}>
                             <div className="modal-content animate-pop" onClick={e => e.stopPropagation()} style={{ maxWidth: '440px' }}>
                                 <div className="modal-header">
@@ -894,13 +916,48 @@
                                     </div>
                                     <div className="form-group" style={{ marginBottom: '1.25rem' }}>
                                         <label>Logistics Partner</label>
-                                        <input
-                                            type="text"
-                                            placeholder="e.g. Delhivery, BlueDart"
-                                            value={fulfillmentForm.carrier}
-                                            onChange={e => setFulfillmentForm({ ...fulfillmentForm, carrier: e.target.value })}
-                                        />
+                                        {logisticsPartners.length > 0 ? (
+                                            <select
+                                                value={fulfillmentForm.carrier}
+                                                onChange={e => setFulfillmentForm({ ...fulfillmentForm, carrier: e.target.value, tracking: '' })}
+                                            >
+                                                <option value="">— Select courier —</option>
+                                                {logisticsPartners.map(lp => (
+                                                    <option key={lp.id} value={lp.name}>{lp.name}{lp.provider_type !== 'manual' ? ' ⚡' : ''}</option>
+                                                ))}
+                                            </select>
+                                        ) : (
+                                            <input
+                                                type="text"
+                                                placeholder="e.g. Delhivery, BlueDart"
+                                                value={fulfillmentForm.carrier}
+                                                onChange={e => setFulfillmentForm({ ...fulfillmentForm, carrier: e.target.value })}
+                                            />
+                                        )}
+                                        {logisticsPartners.length === 0 && (
+                                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>
+                                                Add couriers in <a href="#partners" style={{ color: 'var(--primary)' }}>Partners</a> to pick from a list.
+                                            </div>
+                                        )}
                                     </div>
+
+                                    {canAutoAwb ? (
+                                        <div style={{ textAlign: 'center', padding: '1rem 0' }}>
+                                            <button
+                                                className="btn-primary"
+                                                style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
+                                                onClick={autoAssignAwb}
+                                                disabled={loading}
+                                            >
+                                                <Icon name="zap" size={16} />
+                                                {loading ? 'Contacting Shiprocket…' : 'Auto-assign AWB via Shiprocket'}
+                                            </button>
+                                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                                                Or enter AWB manually below
+                                            </div>
+                                        </div>
+                                    ) : null}
+
                                     <div className="form-group">
                                         <label>Consignment Number (AWB)</label>
                                         <input
@@ -919,7 +976,8 @@
                                 </div>
                             </div>
                         </div>
-                    )}
+                        );
+                    })()}
                     {/* Coupon Modal */}
                     {showCouponModal && (
                         <div className="modal-overlay" onClick={() => setShowCouponModal(false)}>

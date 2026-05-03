@@ -143,6 +143,12 @@ async def startup_event():
         "ALTER TABLE order_returns ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP",
         "ALTER TABLE order_returns ADD COLUMN IF NOT EXISTS approved_by VARCHAR",
         "ALTER TABLE order_returns ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP",
+        "ALTER TABLE logistics_partners ADD COLUMN IF NOT EXISTS provider_type VARCHAR DEFAULT 'manual'",
+        "ALTER TABLE logistics_partners ADD COLUMN IF NOT EXISTS api_email VARCHAR",
+        "ALTER TABLE logistics_partners ADD COLUMN IF NOT EXISTS api_password VARCHAR",
+        "ALTER TABLE logistics_partners ADD COLUMN IF NOT EXISTS pickup_location_name VARCHAR",
+        "ALTER TABLE fulfillments ADD COLUMN IF NOT EXISTS provider_shipment_id VARCHAR",
+        "ALTER TABLE fulfillments ADD COLUMN IF NOT EXISTS shipping_cost FLOAT",
     ]
     try:
         from sqlalchemy import text

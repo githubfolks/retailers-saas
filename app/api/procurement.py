@@ -8,7 +8,7 @@ from app.api.auth import get_current_tenant_id, check_permission
 from app.services.procurement_service import ProcurementService, SupplierPerformanceService
 from app.models.procurement import (
     Supplier, PurchaseOrder, PurchaseOrderLine, OrderFulfillment,
-    BackorderAlert, InventoryCount, CountLine, ProductBarcode
+    BackorderAlert, InventoryCount, CountLine, ProductBarcode, LogisticsPartner
 )
 
 router = APIRouter(
@@ -401,5 +401,98 @@ async def scan_barcode(
     
     if not product:
         raise HTTPException(status_code=404, detail="Barcode not found")
-    
+
     return product
+
+
+# ============ LOGISTICS PARTNERS ============
+
+class LogisticsPartnerCreate(BaseModel):
+    name: str
+    provider_type: str = "manual"  # manual | shiprocket | delhivery
+    api_email: Optional[str] = None
+    api_password: Optional[str] = None
+    pickup_location_name: Optional[str] = None
+    tracking_url_template: Optional[str] = None
+    contact_phone: Optional[str] = None
+    contact_email: Optional[str] = None
+
+
+class LogisticsPartnerResponse(BaseModel):
+    id: int
+    name: str
+    provider_type: str
+    api_email: Optional[str]
+    pickup_location_name: Optional[str]
+    tracking_url_template: Optional[str]
+    contact_phone: Optional[str]
+    contact_email: Optional[str]
+    is_active: bool
+
+    class Config:
+        from_attributes = True
+
+
+@router.post("/logistics-partners", response_model=LogisticsPartnerResponse)
+async def create_logistics_partner(
+    data: LogisticsPartnerCreate,
+    current_tenant_id: str = Depends(get_current_tenant_id),
+    db: Session = Depends(get_db)
+):
+    """Add a logistics / courier partner."""
+    partner = LogisticsPartner(tenant_id=current_tenant_id, **data.model_dump())
+    db.add(partner)
+    db.commit()
+    db.refresh(partner)
+    return partner
+
+
+@router.get("/logistics-partners", response_model=List[LogisticsPartnerResponse])
+async def list_logistics_partners(
+    current_tenant_id: str = Depends(get_current_tenant_id),
+    db: Session = Depends(get_db)
+):
+    """List all logistics partners."""
+    return db.query(LogisticsPartner).filter(
+        LogisticsPartner.tenant_id == current_tenant_id,
+        LogisticsPartner.is_active == True
+    ).all()
+
+
+@router.put("/logistics-partners/{partner_id}", response_model=LogisticsPartnerResponse)
+async def update_logistics_partner(
+    partner_id: int,
+    data: LogisticsPartnerCreate,
+    current_tenant_id: str = Depends(get_current_tenant_id),
+    db: Session = Depends(get_db)
+):
+    """Update a logistics partner."""
+    partner = db.query(LogisticsPartner).filter(
+        LogisticsPartner.id == partner_id,
+        LogisticsPartner.tenant_id == current_tenant_id
+    ).first()
+    if not partner:
+        raise HTTPException(status_code=404, detail="Logistics partner not found")
+    for key, value in data.model_dump(exclude_unset=True).items():
+        setattr(partner, key, value)
+    db.commit()
+    db.refresh(partner)
+    return partner
+
+
+@router.delete("/logistics-partners/{partner_id}")
+async def delete_logistics_partner(
+    partner_id: int,
+    current_tenant_id: str = Depends(get_current_tenant_id),
+    db: Session = Depends(get_db)
+):
+    """Remove a logistics partner (soft delete)."""
+    partner = db.query(LogisticsPartner).filter(
+        LogisticsPartner.id == partner_id,
+        LogisticsPartner.tenant_id == current_tenant_id
+    ).first()
+    if not partner:
+        raise HTTPException(status_code=404, detail="Logistics partner not found")
+    partner.is_active = False
+    db.commit()
+    return {"status": "deleted"}

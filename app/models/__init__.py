@@ -16,7 +16,7 @@ from app.models.procurement import (
     Supplier, PurchaseOrder, PurchaseOrderLine, SupplierPerformance,
     OrderFulfillment, PickingBatch, BackorderAlert, InventoryRule,
     AutomationWorkflow, SupplierEmailSettings, InventoryCount, CountLine,
-    ProductBarcode,
+    ProductBarcode, LogisticsPartner,
 )
 from app.models.sku import ProductSKU
 from app.models.attribute import Attribute, AttributeValue
