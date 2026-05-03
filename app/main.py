@@ -137,6 +137,12 @@ async def startup_event():
     _migrations = [
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method VARCHAR(20)",
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'whatsapp'",
+        "ALTER TABLE order_returns ADD COLUMN IF NOT EXISTS product_id INTEGER",
+        "ALTER TABLE order_returns ADD COLUMN IF NOT EXISTS pickup_address TEXT",
+        "ALTER TABLE order_returns ADD COLUMN IF NOT EXISTS return_warehouse_id INTEGER",
+        "ALTER TABLE order_returns ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP",
+        "ALTER TABLE order_returns ADD COLUMN IF NOT EXISTS approved_by VARCHAR",
+        "ALTER TABLE order_returns ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP",
     ]
     try:
         from sqlalchemy import text
