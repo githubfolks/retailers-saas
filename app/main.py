@@ -28,7 +28,9 @@ from app.api.shifts import router as shifts_router
 from app.api.whatsapp import router as whatsapp_router
 from app.api.ai import router as ai_router
 from app.api.b2b import router as b2b_router
+from app.api.subscription import router as subscription_router
 from app.middleware.request_logger import RequestLoggingMiddleware
+from app.middleware.subscription_guard import SubscriptionGuardMiddleware
 from app.core.logger import request_logger
 from app.core.limiter import limiter
 from slowapi import _rate_limit_exceeded_handler
@@ -66,6 +68,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(SubscriptionGuardMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -100,6 +103,7 @@ app.include_router(shifts_router)
 app.include_router(whatsapp_router)
 app.include_router(ai_router)
 app.include_router(b2b_router)
+app.include_router(subscription_router)
 
 # Mount static files for dashboard
 static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -163,6 +167,15 @@ async def startup_event():
         "ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS reorder_suggestion_id INTEGER",
         # Sprint 5 — picking workflow
         "ALTER TABLE picking_batches ADD COLUMN IF NOT EXISTS warehouse_id INTEGER",
+        # Subscription feature — backfill trial for existing tenants without a subscription
+        """
+        INSERT INTO subscriptions (tenant_id, plan, status, trial_ends_at, created_at, updated_at)
+        SELECT t.tenant_id, 'free', 'active', NULL, NOW(), NOW()
+        FROM tenants t
+        WHERE NOT EXISTS (
+            SELECT 1 FROM subscriptions s WHERE s.tenant_id = t.tenant_id
+        )
+        """,
     ]
     try:
         from sqlalchemy import text

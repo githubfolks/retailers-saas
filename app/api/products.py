@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
 from app.core.database import get_db
-from app.api.auth import get_current_tenant_id
+from app.api.auth import get_current_tenant_id, check_write_permission
 from app.core.logger import request_logger
 from app.models.image import ProductImage
 import shutil
@@ -16,7 +16,7 @@ from app.models.brand import Brand
 from app.models.attribute import AttributeValue
 from app.models.sku import ProductSKU
 
-router = APIRouter(prefix="/products", tags=["products"])
+router = APIRouter(prefix="/products", tags=["products"], dependencies=[Depends(check_write_permission("inventory"))])
 
 
 class ProductCreate(BaseModel):

@@ -110,21 +110,53 @@ def check_permission(required_module: str):
     def permission_dependency(user: dict = Depends(get_current_user)):
         role = user.get("role")
         permissions = user.get("permissions") or ""
-        
+
         # Owner has all permissions
         if role == UserRole.OWNER:
             return user
-            
+
         # Check specific module permission
         if required_module in permissions.split(","):
             return user
-            
+
         request_logger.warning(f"Access denied for {role} to module: {required_module}")
         raise HTTPException(
-            status_code=403, 
+            status_code=403,
             detail=f"You do not have permission to access the {required_module} module"
         )
     return permission_dependency
+
+def check_plan_module(required_module: str):
+    """Block access if the tenant's subscription plan does not include this module."""
+    from app.core.database import get_db
+    from sqlalchemy.orm import Session
+
+    def _dep(user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+        from app.services.subscription_service import SubscriptionService
+        svc = SubscriptionService(db, user["tenant_id"])
+        sub = svc.get_or_create()
+        if not svc.can_access_module(sub, required_module):
+            raise HTTPException(
+                status_code=402,
+                detail=f"The '{required_module}' module requires a higher plan. Current plan: {sub.plan}",
+            )
+        return user
+    return _dep
+
+def check_write_permission(required_module: str):
+    """Allow GET/HEAD to any authenticated user; restrict mutating methods to module permission."""
+    def _dep(request: Request, user: dict = Depends(get_current_user)):
+        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+            role = user.get("role")
+            permissions = user.get("permissions") or ""
+            if role != UserRole.OWNER and required_module not in permissions.split(","):
+                request_logger.warning(f"Access denied for {role} writing to {required_module}")
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"You do not have permission to modify {required_module} data"
+                )
+        return user
+    return _dep
 
 # Endpoints
 @router.post("/login", response_model=LoginResponse)
@@ -196,7 +228,11 @@ async def signup(signup_data: SignupRequest, db: Session = Depends(get_db)):
         )
         db.add(new_user)
         db.commit()
-        
+
+        # Start 14-day free trial automatically
+        from app.services.subscription_service import SubscriptionService
+        SubscriptionService(db, tenant_id).get_or_create()
+
         request_logger.info(f"New merchant: {signup_data.business_name} (ID: {tenant_id})")
         return {"status": "success", "message": "Business registered successfully", "tenant_id": tenant_id}
         

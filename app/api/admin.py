@@ -454,3 +454,68 @@ async def cancel_supplier_notification(
     notif.status = "failed"
     db.commit()
     return {"message": "Notification cancelled successfully", "id": notification_id}
+
+
+# ── Subscription management ───────────────────────────────────────────────────
+
+class AdminSubscriptionRequest(BaseModel):
+    plan: str
+    status: str = "active"
+    days: int = 30
+
+
+@router.post("/tenants/{tenant_id}/subscription")
+async def set_tenant_subscription(
+    tenant_id: str,
+    body: AdminSubscriptionRequest,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Manually set a tenant's subscription plan (admin override, no Razorpay)."""
+    verify_admin_token(authorization)
+
+    tenant = db.query(Tenant).filter(Tenant.tenant_id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    from app.services.subscription_service import SubscriptionService
+    from app.models.subscription import PLANS
+
+    if body.plan not in PLANS:
+        raise HTTPException(400, f"Unknown plan '{body.plan}'. Valid: {list(PLANS)}")
+
+    svc = SubscriptionService(db, tenant_id)
+    sub = svc.set_plan_manual(body.plan, body.status, body.days)
+    return {
+        "tenant_id": tenant_id,
+        "plan": sub.plan,
+        "status": sub.status,
+        "current_period_end": sub.current_period_end,
+    }
+
+
+@router.get("/tenants/{tenant_id}/subscription")
+async def get_tenant_subscription(
+    tenant_id: str,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Get a tenant's current subscription."""
+    verify_admin_token(authorization)
+
+    from app.services.subscription_service import SubscriptionService
+    from app.models.subscription import PLANS
+
+    svc = SubscriptionService(db, tenant_id)
+    sub = svc.get_or_create()
+    return {
+        "tenant_id": tenant_id,
+        "plan": sub.plan,
+        "status": sub.status,
+        "is_active": svc.is_active(sub),
+        "days_remaining": svc.days_remaining(sub),
+        "trial_ends_at": sub.trial_ends_at,
+        "current_period_end": sub.current_period_end,
+        "razorpay_subscription_id": sub.razorpay_subscription_id,
+        "modules": PLANS.get(sub.plan, PLANS["free"])["modules"],
+    }

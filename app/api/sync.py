@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.api.auth import get_current_tenant_id
+from app.api.auth import get_current_tenant_id, check_permission
 from app.tasks import sync_odoo_products_task, sync_odoo_orders_task
 from app.core.logger import request_logger
 
-router = APIRouter(prefix="/sync", tags=["sync"])
+router = APIRouter(prefix="/sync", tags=["sync"], dependencies=[Depends(check_permission("settings"))])
 
 @router.post("/products")
 async def sync_all_products(

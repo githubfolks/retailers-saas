@@ -5,11 +5,11 @@ from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timedelta
 from app.core.database import get_db
-from app.api.auth import get_current_tenant_id
+from app.api.auth import get_current_tenant_id, check_permission
 from app.models.b2b import B2BCustomer, WholesalePriceList, B2BOrder
 from app.models.sku import ProductSKU
 
-router = APIRouter(prefix="/b2b", tags=["b2b"])
+router = APIRouter(prefix="/b2b", tags=["b2b"], dependencies=[Depends(check_permission("procurement"))])
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────

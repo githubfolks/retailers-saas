@@ -8,6 +8,10 @@ class Settings(BaseSettings):
     whatsapp_verify_token: str
     odoo_url: str
     razorpay_key: str
+    razorpay_secret: str = ""
+    razorpay_webhook_secret: str = ""
+    razorpay_plan_starter: str = ""  # Razorpay plan ID for Starter tier
+    razorpay_plan_pro: str = ""      # Razorpay plan ID for Pro tier
     secret_key: str
     redis_url: str = "redis://redis:6379"
     admin_password: str = "admin123"

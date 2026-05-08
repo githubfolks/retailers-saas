@@ -31,3 +31,4 @@ from app.models.fulfillment import Fulfillment
 from app.models.shift import Shift
 from app.models.conversation import ConversationState
 from app.models.b2b import B2BCustomer, WholesalePriceList, B2BOrder
+from app.models.subscription import Subscription

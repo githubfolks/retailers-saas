@@ -14,10 +14,10 @@ from app.core.limiter import limiter
 from app.models.sku import ProductSKU, SKUBarcode, SKUPlatformMapping
 from app.services.sku_lookup_service import SKULookupService
 from app.core.logger import get_logger
-from app.api.auth import get_current_tenant_id as get_current_tenant
+from app.api.auth import get_current_tenant_id as get_current_tenant, check_permission
 
 logger = get_logger(__name__)
-router = APIRouter(prefix="/sku", tags=["SKU Management"])
+router = APIRouter(prefix="/sku", tags=["SKU Management"], dependencies=[Depends(check_permission("inventory"))])
 
 
 # ========== PYDANTIC SCHEMAS ==========

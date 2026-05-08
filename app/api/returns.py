@@ -4,11 +4,11 @@ from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
 from app.core.database import get_db
-from app.api.auth import get_current_tenant_id
+from app.api.auth import get_current_tenant_id, check_permission
 from app.services.return_service import ReturnService
 from app.models.return_refund import OrderReturn, Refund, ReturnPickup, ReturnShipment, ReturnInspection
 
-router = APIRouter(prefix="/returns", tags=["returns"])
+router = APIRouter(prefix="/returns", tags=["returns"], dependencies=[Depends(check_permission("pos"))])
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────

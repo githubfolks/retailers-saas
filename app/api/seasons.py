@@ -2,13 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.core.database import get_db
-from app.api.auth import get_current_tenant_id
+from app.api.auth import get_current_tenant_id, check_write_permission
 from app.models.season import Season, Collection
 from app.services.season_service import SeasonService
 from pydantic import BaseModel
 from datetime import datetime
 
-router = APIRouter(prefix="/seasons", tags=["seasons"])
+router = APIRouter(prefix="/seasons", tags=["seasons"], dependencies=[Depends(check_write_permission("inventory"))])
 
 class SeasonCreate(BaseModel):
     name: str

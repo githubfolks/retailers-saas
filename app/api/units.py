@@ -3,10 +3,10 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
 from app.core.database import get_db
-from app.api.auth import get_current_tenant_id
+from app.api.auth import get_current_tenant_id, check_write_permission
 from app.models.unit import Unit
 
-router = APIRouter(prefix="/units", tags=["units"])
+router = APIRouter(prefix="/units", tags=["units"], dependencies=[Depends(check_write_permission("inventory"))])
 
 class UnitBase(BaseModel):
     name: str
