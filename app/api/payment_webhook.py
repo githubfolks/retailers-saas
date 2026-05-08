@@ -98,38 +98,48 @@ async def payment_webhook(
 async def handle_payment_completed(payload: Dict[str, Any], db: Session, tenant: Any):
     """Update order status and trigger fulfillment workflows."""
     from app.services.n8n_service import N8NService
+    from app.services.whatsapp_bot_service import WhatsAppBotService
     from app.models.order import Order
-    
+    import asyncio
+
     try:
         data = payload.get("payload", {})
         payment_link = data.get("payment_link", {}) or data.get("payment", {})
         notes = payment_link.get("notes", {})
         order_id = notes.get("order_id")
-        
+
         if not order_id:
             return {"status": "error", "message": "order_id_missing"}
 
-        # Update Local Database
         order = db.query(Order).filter(Order.id == int(order_id)).first()
         if order:
             order.payment_status = "completed"
             order.status = "processing"
             db.commit()
-            
-            # Trigger n8n Workflow
+
+            # n8n workflow
             if tenant.n8n_webhook_url:
-                import asyncio
                 asyncio.create_task(N8NService.trigger_payment_flow(
                     tenant.n8n_webhook_url,
                     order.id,
                     payment_link.get("id")
                 ))
-            
+
+            # WhatsApp: confirm payment to customer + alert merchant
+            amount = order.grand_total or order.total_amount
+            if order.customer_mobile:
+                asyncio.create_task(WhatsAppBotService.send_order_confirmation(
+                    tenant, order.customer_mobile, order.id, amount
+                ))
+            asyncio.create_task(WhatsAppBotService.send_payment_received_alert(
+                tenant, order.id, amount
+            ))
+
             request_logger.info(f"Order {order_id} marked as PAID for {tenant.tenant_id}")
             return {"status": "success", "order_id": order_id}
-            
+
         return {"status": "not_found"}
-        
+
     except Exception as e:
         request_logger.error(f"Fulfillment Logic Failed: {str(e)}")
         return {"status": "error"}

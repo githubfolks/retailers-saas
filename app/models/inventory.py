@@ -182,3 +182,17 @@ class InventoryAuditLog(Base):
     change_reason = Column(String, nullable=True)
     ip_address = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class StockWatchlist(Base):
+    __tablename__ = "stock_watchlist"
+    __table_args__ = (
+        Index("ix_stock_watchlist_tenant_sku", "tenant_id", "sku"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(String, ForeignKey("tenants.tenant_id"), index=True)
+    mobile = Column(String, index=True)
+    sku = Column(String, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    notified_at = Column(DateTime, nullable=True)

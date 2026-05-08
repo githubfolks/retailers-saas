@@ -29,6 +29,7 @@ class PurchaseOrder(Base):
     tenant_id = Column(String, ForeignKey("tenants.tenant_id"), index=True)
     supplier_id = Column(Integer, ForeignKey("suppliers.id"))
     po_number = Column(String, unique=True, index=True)
+    reorder_suggestion_id = Column(Integer, nullable=True)  # traceability to AI suggestion
     po_date = Column(DateTime, default=datetime.utcnow)
     expected_delivery = Column(DateTime)
     actual_delivery = Column(DateTime, nullable=True)
@@ -109,6 +110,34 @@ class PickingBatch(Base):
     picker_id = Column(String, nullable=True) # User ID assigned to pick this batch
     
     notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PickingBatchOrder(Base):
+    """Junction: orders assigned to a picking batch."""
+    __tablename__ = "picking_batch_orders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    batch_id = Column(Integer, ForeignKey("picking_batches.id"), index=True)
+    order_id = Column(Integer, ForeignKey("orders.id"), index=True)
+
+
+class PickingBatchLine(Base):
+    """One line per SKU to be picked in a batch."""
+    __tablename__ = "picking_batch_lines"
+
+    id = Column(Integer, primary_key=True, index=True)
+    batch_id = Column(Integer, ForeignKey("picking_batches.id"), index=True)
+    order_id = Column(Integer, ForeignKey("orders.id"), index=True)
+    sku = Column(String, index=True)
+    product_name = Column(String)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=True)
+    bin_number = Column(String, nullable=True)
+    zone_name = Column(String, nullable=True)
+    qty_required = Column(Integer, default=1)
+    qty_picked = Column(Integer, default=0)
+    status = Column(String, default="pending")  # pending, picked, short
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

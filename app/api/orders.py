@@ -745,12 +745,11 @@ async def create_order(
         db.commit()
         db.refresh(new_order)
         
-        # Dispatch n8n workflow trigger (background or direct)
+        # Dispatch n8n workflow trigger
         if tenant.n8n_webhook_url:
             import asyncio
-            # We can run this in background for speed
             asyncio.create_task(N8NService.trigger_order_flow(
-                tenant.n8n_webhook_url, 
+                tenant.n8n_webhook_url,
                 {
                     "id": new_order.id,
                     "tenant_id": new_order.tenant_id,
@@ -760,7 +759,18 @@ async def create_order(
                     "business_name": tenant.business_name
                 }
             ))
-            
+
+        # WhatsApp: confirm to customer + alert merchant
+        import asyncio
+        from app.services.whatsapp_bot_service import WhatsAppBotService
+        grand = new_order.grand_total or new_order.total_amount
+        asyncio.create_task(WhatsAppBotService.send_order_confirmation(
+            tenant, new_order.customer_mobile, new_order.id, grand
+        ))
+        asyncio.create_task(WhatsAppBotService.send_new_order_alert(
+            tenant, new_order.id, new_order.customer_mobile, grand
+        ))
+
         request_logger.info(f"Created order {new_order.id} for tenant: {current_tenant_id}")
         return new_order
         
@@ -850,18 +860,51 @@ async def fulfill_order(
     order.status = "completed" # Or "shipped" depending on business logic
     db.add(fulfillment)
     
-    # Trigger WhatsApp Dispatch Notification
+    db.commit()
+
     from app.services.whatsapp_bot_service import WhatsAppBotService
-    from app.models.tenant import Tenant
     tenant = db.query(Tenant).filter(Tenant.tenant_id == current_tenant_id).first()
     if tenant and order.customer_mobile:
         import asyncio
         asyncio.create_task(WhatsAppBotService.send_dispatch_notification(
             tenant, order.customer_mobile, order.id, tracking_number
         ))
-    
-    db.commit()
+
     return fulfillment
+
+
+@router.post("/{order_id}/cod-collected")
+async def mark_cod_collected(
+    order_id: int,
+    amount: float = Query(..., description="Amount collected"),
+    current_tenant_id: str = Depends(get_current_tenant_id),
+    db: Session = Depends(get_db),
+):
+    """Mark a COD order as collected by the delivery agent."""
+    order = db.query(Order).filter(
+        Order.id == order_id,
+        Order.tenant_id == current_tenant_id,
+    ).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.payment_method != "cod":
+        raise HTTPException(status_code=400, detail="Order is not a COD order")
+
+    order.cod_amount_collected = amount
+    order.cod_collected_at = datetime.utcnow()
+    order.payment_status = "completed"
+    order.status = "completed"
+    db.commit()
+
+    tenant = db.query(Tenant).filter(Tenant.tenant_id == current_tenant_id).first()
+    if tenant:
+        import asyncio
+        from app.services.whatsapp_bot_service import WhatsAppBotService
+        asyncio.create_task(WhatsAppBotService.send_payment_received_alert(
+            tenant, order.id, amount
+        ))
+
+    return {"status": "collected", "order_id": order_id, "amount_collected": amount}
 
 
 @router.post("/{order_id}/auto-fulfill", response_model=FulfillmentResponse)

@@ -148,6 +148,55 @@ def send_template_message(
         return None
 
 
+def send_interactive_list(
+    recipient_number: str,
+    header: str,
+    body: str,
+    button_text: str,
+    sections: list,
+    phone_number_id: str = None,
+    whatsapp_token: str = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Send a WhatsApp interactive list message.
+
+    sections format: [{"title": "...", "rows": [{"id": "SKU", "title": "...", "description": "..."}]}]
+    The row id is what comes back when the user taps — set it to the SKU code so the bot can
+    process it as a normal SKU lookup.
+    """
+    if not phone_number_id or not whatsapp_token:
+        return None
+
+    try:
+        url = f"https://graph.facebook.com/v17.0/{phone_number_id}/messages"
+        headers = {"Authorization": f"Bearer {whatsapp_token}", "Content-Type": "application/json"}
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": recipient_number,
+            "type": "interactive",
+            "interactive": {
+                "type": "list",
+                "header": {"type": "text", "text": header},
+                "body": {"text": body},
+                "action": {"button": button_text, "sections": sections},
+            },
+        }
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        if response.status_code not in [200, 201]:
+            request_logger.error(f"WhatsApp list API error: {response.status_code}, {response.text}")
+            return None
+        data = response.json()
+        return {
+            "message_id": data.get("messages", [{}])[0].get("id"),
+            "status": "sent",
+            "recipient": recipient_number,
+        }
+    except Exception as e:
+        request_logger.error(f"Error sending WhatsApp interactive list: {str(e)}")
+        return None
+
+
 def send_media_message(
     recipient_number: str,
     media_url: str,

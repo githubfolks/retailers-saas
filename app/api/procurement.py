@@ -5,10 +5,11 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 from app.core.database import get_db
 from app.api.auth import get_current_tenant_id, check_permission
-from app.services.procurement_service import ProcurementService, SupplierPerformanceService
+from app.services.procurement_service import ProcurementService, SupplierPerformanceService, PickingService
 from app.models.procurement import (
     Supplier, PurchaseOrder, PurchaseOrderLine, OrderFulfillment,
-    BackorderAlert, InventoryCount, CountLine, ProductBarcode, LogisticsPartner
+    BackorderAlert, InventoryCount, CountLine, ProductBarcode, LogisticsPartner,
+    PickingBatch, PickingBatchOrder, PickingBatchLine,
 )
 
 router = APIRouter(
@@ -255,10 +256,29 @@ async def update_fulfillment_status(
 ):
     """Update fulfillment status."""
     service = ProcurementService(db, current_tenant_id)
-    
+
     if not service.update_fulfillment_status(fulfillment_id, status):
         raise HTTPException(status_code=400, detail="Failed to update fulfillment")
-    
+
+    # Notify customer on delivery
+    if status == "delivered":
+        from app.models.procurement import OrderFulfillment
+        from app.models.order import Order
+        from app.models.tenant import Tenant
+        from app.services.whatsapp_bot_service import WhatsAppBotService
+        import asyncio
+
+        fulfillment = db.query(OrderFulfillment).filter(
+            OrderFulfillment.id == fulfillment_id
+        ).first()
+        if fulfillment:
+            order = db.query(Order).filter(Order.id == fulfillment.order_id).first()
+            tenant = db.query(Tenant).filter(Tenant.tenant_id == current_tenant_id).first()
+            if order and tenant and order.customer_mobile:
+                asyncio.create_task(WhatsAppBotService.send_delivery_notification(
+                    tenant, order.customer_mobile, order.id
+                ))
+
     return {"status": "success", "message": f"Fulfillment status updated to {status}"}
 
 
@@ -496,3 +516,164 @@ async def delete_logistics_partner(
     partner.is_active = False
     db.commit()
     return {"status": "deleted"}
+
+
+# ============ PICKING BATCHES ============
+
+class PickingBatchCreate(BaseModel):
+    order_ids: List[int]
+    picker_id: str
+    batch_name: Optional[str] = None
+    warehouse_id: Optional[int] = None
+
+
+class PickingBatchStatusUpdate(BaseModel):
+    status: str  # draft, in_progress, packed, shipped
+
+
+class ScanConfirmRequest(BaseModel):
+    barcode: str
+    qty_picked: int
+
+
+@router.post("/picking-batches")
+async def create_picking_batch(
+    data: PickingBatchCreate,
+    current_tenant_id: str = Depends(get_current_tenant_id),
+    db: Session = Depends(get_db),
+):
+    """Create a picking batch from a list of order IDs."""
+    svc = PickingService(db, current_tenant_id)
+    batch_id = svc.create_batch(
+        order_ids=data.order_ids,
+        picker_id=data.picker_id,
+        batch_name=data.batch_name,
+        warehouse_id=data.warehouse_id,
+    )
+    return {"batch_id": batch_id, "status": "draft"}
+
+
+@router.get("/picking-batches")
+async def list_picking_batches(
+    status: Optional[str] = None,
+    current_tenant_id: str = Depends(get_current_tenant_id),
+    db: Session = Depends(get_db),
+):
+    """List all picking batches for the tenant, optionally filtered by status."""
+    q = db.query(PickingBatch).filter(PickingBatch.tenant_id == current_tenant_id)
+    if status:
+        q = q.filter(PickingBatch.status == status)
+    batches = q.order_by(PickingBatch.created_at.desc()).all()
+
+    result = []
+    for b in batches:
+        order_count = db.query(PickingBatchOrder).filter(
+            PickingBatchOrder.batch_id == b.id
+        ).count()
+        result.append({
+            "id": b.id,
+            "batch_name": b.batch_name,
+            "status": b.status,
+            "picker_id": b.picker_id,
+            "warehouse_id": b.warehouse_id,
+            "order_count": order_count,
+            "created_at": b.created_at,
+        })
+    return result
+
+
+@router.get("/picking-batches/{batch_id}/picklist")
+async def get_picklist(
+    batch_id: int,
+    current_tenant_id: str = Depends(get_current_tenant_id),
+    db: Session = Depends(get_db),
+):
+    """Return pick list for the batch sorted by zone and bin."""
+    batch = db.query(PickingBatch).filter(
+        PickingBatch.id == batch_id,
+        PickingBatch.tenant_id == current_tenant_id,
+    ).first()
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    svc = PickingService(db, current_tenant_id)
+    return {
+        "batch_id": batch_id,
+        "batch_name": batch.batch_name,
+        "status": batch.status,
+        "picker_id": batch.picker_id,
+        "lines": svc.generate_picklist(batch_id),
+    }
+
+
+@router.patch("/picking-batches/{batch_id}/status")
+async def update_batch_status(
+    batch_id: int,
+    data: PickingBatchStatusUpdate,
+    current_tenant_id: str = Depends(get_current_tenant_id),
+    db: Session = Depends(get_db),
+):
+    """Advance batch status: draft → in_progress → packed → shipped."""
+    valid = {"draft", "in_progress", "packed", "shipped"}
+    if data.status not in valid:
+        raise HTTPException(status_code=400, detail=f"Status must be one of {valid}")
+
+    batch = db.query(PickingBatch).filter(
+        PickingBatch.id == batch_id,
+        PickingBatch.tenant_id == current_tenant_id,
+    ).first()
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    if data.status == "packed":
+        svc = PickingService(db, current_tenant_id)
+        if not svc.complete_batch(batch_id):
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot mark packed: some lines are still pending",
+            )
+    else:
+        batch.status = data.status
+        batch.updated_at = datetime.utcnow()
+        db.commit()
+
+    return {"batch_id": batch_id, "status": data.status}
+
+
+@router.post("/picking-batches/{batch_id}/scan-confirm")
+async def scan_confirm_pick(
+    batch_id: int,
+    data: ScanConfirmRequest,
+    current_tenant_id: str = Depends(get_current_tenant_id),
+    db: Session = Depends(get_db),
+):
+    """Confirm an item has been picked by scanning its barcode."""
+    batch = db.query(PickingBatch).filter(
+        PickingBatch.id == batch_id,
+        PickingBatch.tenant_id == current_tenant_id,
+    ).first()
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    if batch.status not in {"in_progress", "draft"}:
+        raise HTTPException(status_code=400, detail="Batch is not active")
+
+    svc = PickingService(db, current_tenant_id)
+    ok = svc.confirm_pick(batch_id, data.barcode, data.qty_picked)
+    if not ok:
+        raise HTTPException(
+            status_code=404,
+            detail="Barcode not found or no pending line matches this product",
+        )
+
+    # Check if all lines are now resolved; auto-advance batch to in_progress if it was draft
+    if batch.status == "draft":
+        batch.status = "in_progress"
+        batch.updated_at = datetime.utcnow()
+        db.commit()
+
+    pending = db.query(PickingBatchLine).filter(
+        PickingBatchLine.batch_id == batch_id,
+        PickingBatchLine.status == "pending",
+    ).count()
+
+    return {"confirmed": True, "remaining_pending_lines": pending}

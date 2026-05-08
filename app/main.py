@@ -27,6 +27,7 @@ from app.api.seasons import router as seasons_router
 from app.api.shifts import router as shifts_router
 from app.api.whatsapp import router as whatsapp_router
 from app.api.ai import router as ai_router
+from app.api.b2b import router as b2b_router
 from app.middleware.request_logger import RequestLoggingMiddleware
 from app.core.logger import request_logger
 from app.core.limiter import limiter
@@ -98,6 +99,7 @@ app.include_router(seasons_router)
 app.include_router(shifts_router)
 app.include_router(whatsapp_router)
 app.include_router(ai_router)
+app.include_router(b2b_router)
 
 # Mount static files for dashboard
 static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -149,6 +151,18 @@ async def startup_event():
         "ALTER TABLE logistics_partners ADD COLUMN IF NOT EXISTS pickup_location_name VARCHAR",
         "ALTER TABLE fulfillments ADD COLUMN IF NOT EXISTS provider_shipment_id VARCHAR",
         "ALTER TABLE fulfillments ADD COLUMN IF NOT EXISTS shipping_cost FLOAT",
+        # Sprint 1 — merchant alerts
+        "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS owner_mobile VARCHAR",
+        "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS whatsapp_phone_id VARCHAR",
+        "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS whatsapp_token VARCHAR",
+        # Sprint 2 — address collection + COD
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_address TEXT",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS cod_amount_collected FLOAT",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS cod_collected_at TIMESTAMP",
+        # Sprint 2 — auto-PO traceability
+        "ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS reorder_suggestion_id INTEGER",
+        # Sprint 5 — picking workflow
+        "ALTER TABLE picking_batches ADD COLUMN IF NOT EXISTS warehouse_id INTEGER",
     ]
     try:
         from sqlalchemy import text

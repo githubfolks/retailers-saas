@@ -54,5 +54,9 @@ class Order(Base):
     hsn_code = Column(String(10), nullable=True)   # Snapshot at time of sale
 
     # POS & Channel Tracking
-    payment_method = Column(String(20), nullable=True)  # cash, upi, card
+    payment_method = Column(String(20), nullable=True)  # cash, upi, card, cod
     source = Column(String(20), default="whatsapp")     # whatsapp, pos, web
+
+    # COD collection tracking
+    cod_amount_collected = Column(Float, nullable=True)
+    cod_collected_at = Column(DateTime, nullable=True)

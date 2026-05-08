@@ -11,10 +11,12 @@ from app.models.customer import Customer
 from app.models.inventory import (
     StockLocation, StockMovement, StockAlert, InventoryNotification,
     DemandForecast, ReorderSuggestion, Warehouse, StockTransfer, InventoryAuditLog,
+    StockWatchlist,
 )
 from app.models.procurement import (
     Supplier, PurchaseOrder, PurchaseOrderLine, SupplierPerformance,
-    OrderFulfillment, PickingBatch, BackorderAlert, InventoryRule,
+    OrderFulfillment, PickingBatch, PickingBatchOrder, PickingBatchLine,
+    BackorderAlert, InventoryRule,
     AutomationWorkflow, SupplierEmailSettings, InventoryCount, CountLine,
     ProductBarcode, LogisticsPartner,
 )
@@ -28,3 +30,4 @@ from app.models.valuation import StockValuationLayer, LandedCost, LandedCostAssi
 from app.models.fulfillment import Fulfillment
 from app.models.shift import Shift
 from app.models.conversation import ConversationState
+from app.models.b2b import B2BCustomer, WholesalePriceList, B2BOrder

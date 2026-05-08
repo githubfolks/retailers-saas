@@ -88,9 +88,31 @@ async def approve_return(
     db: Session = Depends(get_db),
 ):
     """Approve or reject a return request."""
+    import asyncio
+    from app.models.order import Order
+    from app.models.tenant import Tenant
+    from app.services.whatsapp_bot_service import WhatsAppBotService
+
     try:
         service = ReturnService(db, current_tenant_id)
-        return service.approve_return(return_id, req.approved_by, req.approved)
+        result = service.approve_return(return_id, req.approved_by, req.approved)
+
+        db_return = db.query(OrderReturn).filter(OrderReturn.id == return_id).first()
+        if db_return:
+            order = db.query(Order).filter(Order.id == db_return.order_id).first()
+            tenant = db.query(Tenant).filter(Tenant.tenant_id == current_tenant_id).first()
+            if order and tenant and order.customer_mobile:
+                if req.approved:
+                    asyncio.create_task(WhatsAppBotService.send_return_approved(
+                        tenant, order.customer_mobile, return_id
+                    ))
+                else:
+                    asyncio.create_task(WhatsAppBotService.send_return_rejected(
+                        tenant, order.customer_mobile, return_id,
+                        "Does not meet our return policy criteria"
+                    ))
+
+        return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -105,11 +127,28 @@ async def schedule_pickup(
     db: Session = Depends(get_db),
 ):
     """Schedule a pickup agent to collect the item from the customer."""
+    import asyncio
+    from app.models.order import Order
+    from app.models.tenant import Tenant
+    from app.services.whatsapp_bot_service import WhatsAppBotService
+
     try:
         service = ReturnService(db, current_tenant_id)
-        return service.schedule_pickup(
+        result = service.schedule_pickup(
             return_id, req.scheduled_date, req.pickup_address, req.pickup_agent
         )
+
+        db_return = db.query(OrderReturn).filter(OrderReturn.id == return_id).first()
+        if db_return:
+            order = db.query(Order).filter(Order.id == db_return.order_id).first()
+            tenant = db.query(Tenant).filter(Tenant.tenant_id == current_tenant_id).first()
+            if order and tenant and order.customer_mobile:
+                pickup_date = req.scheduled_date.strftime("%d %b %Y, %I:%M %p")
+                asyncio.create_task(WhatsAppBotService.send_return_pickup_scheduled(
+                    tenant, order.customer_mobile, return_id, pickup_date
+                ))
+
+        return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -243,9 +282,27 @@ async def process_refund(
     db: Session = Depends(get_db),
 ):
     """Process financial refund after inspection approval."""
+    import asyncio
+    from app.models.order import Order
+    from app.models.tenant import Tenant
+    from app.services.whatsapp_bot_service import WhatsAppBotService
+
     try:
         service = ReturnService(db, current_tenant_id)
-        return service.process_refund(req.return_id, req.amount)
+        result = service.process_refund(req.return_id, req.amount)
+
+        db_return = db.query(OrderReturn).filter(OrderReturn.id == req.return_id).first()
+        if db_return and db_return.refund:
+            order = db.query(Order).filter(Order.id == db_return.order_id).first()
+            tenant = db.query(Tenant).filter(Tenant.tenant_id == current_tenant_id).first()
+            if order and tenant and order.customer_mobile:
+                refund_amount = db_return.refund.amount or req.amount or 0
+                asyncio.create_task(WhatsAppBotService.send_refund_processed(
+                    tenant, order.customer_mobile, req.return_id,
+                    refund_amount, db_return.refund.refund_method or "original payment"
+                ))
+
+        return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

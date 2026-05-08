@@ -4,7 +4,7 @@ from celery import shared_task
 from datetime import datetime, timedelta
 from app.core.database import get_task_db
 from app.models.product import Product
-from app.models.inventory import StockLocation, StockAlert, DemandForecast, ReorderSuggestion
+from app.models.inventory import StockLocation, StockAlert, DemandForecast, ReorderSuggestion, StockWatchlist
 from app.models.tenant import Tenant
 from app.services.llm_inventory_bot import LLMDemandForecaster, LLMReorderOptimizer
 from app.core.logger import request_logger
@@ -83,6 +83,10 @@ def check_low_stock_alerts(self, tenant_id: str):
     """Check inventory levels and create alerts."""
     with get_task_db() as db:
         try:
+            tenant = db.query(Tenant).filter(Tenant.tenant_id == tenant_id).first()
+            if not tenant:
+                return {"status": "error", "message": "Tenant not found"}
+
             # Single query for all low-stock locations
             low_stock_locs = db.query(StockLocation).filter(
                 StockLocation.tenant_id == tenant_id,
@@ -116,6 +120,38 @@ def check_low_stock_alerts(self, tenant_id: str):
 
             if new_alerts:
                 db.bulk_save_objects(new_alerts)
+                db.flush()
+
+            # Queue WhatsApp notifications to merchant for each new alert
+            owner_mobile = getattr(tenant, "owner_mobile", None)
+            if owner_mobile and new_alerts:
+                from app.models.inventory import InventoryNotification
+                from app.models.product import Product as ProductModel
+                product_map = {
+                    p.id: p.name for p in db.query(ProductModel).filter(
+                        ProductModel.id.in_([a.product_id for a in new_alerts])
+                    ).all()
+                }
+                wa_notifications = []
+                for alert in new_alerts:
+                    product_name = product_map.get(alert.product_id, f"Product #{alert.product_id}")
+                    msg = (
+                        f"{'Out of Stock' if alert.alert_type == 'out_of_stock' else 'Low Stock'}: "
+                        f"{product_name}\n"
+                        f"Current: {alert.current_value} units (threshold: {alert.threshold_value})"
+                    )
+                    wa_notifications.append(InventoryNotification(
+                        tenant_id=tenant_id,
+                        alert_id=alert.id,
+                        recipient=owner_mobile,
+                        notification_type=alert.alert_type,
+                        channel="whatsapp",
+                        message=msg,
+                        status="pending",
+                    ))
+                if wa_notifications:
+                    db.bulk_save_objects(wa_notifications)
+
             db.commit()
 
             alerts_created = len(new_alerts)
@@ -343,6 +379,32 @@ def generate_demand_forecasts(self, tenant_id: str):
                 loop.close()
 
             db.commit()
+
+            # Backfill actual_demand for past forecasts that are still NULL
+            now = datetime.utcnow()
+            stale = db.query(DemandForecast).filter(
+                DemandForecast.tenant_id == tenant_id,
+                DemandForecast.forecast_date < now,
+                DemandForecast.actual_demand.is_(None),
+            ).all()
+            if stale:
+                from app.models.order import Order
+                from sqlalchemy import func
+                for forecast in stale:
+                    window_start = forecast.forecast_date - timedelta(days=30)
+                    row = db.query(func.coalesce(func.sum(Order.quantity), 0)).filter(
+                        Order.tenant_id == tenant_id,
+                        Order.created_at >= window_start,
+                        Order.created_at < forecast.forecast_date,
+                        Order.status != "cancelled",
+                    ).scalar()
+                    forecast.actual_demand = float(row or 0)
+                    if forecast.predicted_demand:
+                        forecast.accuracy_error = abs(
+                            forecast.predicted_demand - forecast.actual_demand
+                        )
+                db.commit()
+
             request_logger.info(f"Generated {forecasts_created} demand forecasts for {tenant_id}")
             return {"status": "success", "forecasts": forecasts_created}
 
@@ -401,6 +463,121 @@ def generate_reorder_suggestions(self, tenant_id: str):
             raise self.retry(exc=exc, countdown=60)
 
 
+@shared_task(bind=True, max_retries=3)
+def auto_create_draft_pos(self, tenant_id: str):
+    """Convert high-confidence ReorderSuggestions into draft PurchaseOrders."""
+    with get_task_db() as db:
+        try:
+            from app.models.inventory import ReorderSuggestion
+            from app.models.procurement import (
+                PurchaseOrder, PurchaseOrderLine, Supplier
+            )
+            from app.integrations.whatsapp_sender import send_whatsapp_message
+
+            tenant = db.query(Tenant).filter(Tenant.tenant_id == tenant_id).first()
+            if not tenant:
+                return {"status": "error", "message": "Tenant not found"}
+
+            now = datetime.utcnow()
+            suggestions = db.query(ReorderSuggestion).filter(
+                ReorderSuggestion.tenant_id == tenant_id,
+                ReorderSuggestion.status == "pending",
+                ReorderSuggestion.ai_confidence >= 70,
+                ReorderSuggestion.expires_at > now,
+            ).all()
+
+            pos_created = 0
+            for suggestion in suggestions:
+                product = db.query(Product).filter(
+                    Product.id == suggestion.product_id
+                ).first()
+                product_name = product.name if product else f"Product #{suggestion.product_id}"
+
+                # Find preferred supplier via PO history for this product
+                supplier = (
+                    db.query(Supplier)
+                    .join(PurchaseOrder, PurchaseOrder.supplier_id == Supplier.id)
+                    .join(PurchaseOrderLine, PurchaseOrderLine.po_id == PurchaseOrder.id)
+                    .filter(
+                        PurchaseOrder.tenant_id == tenant_id,
+                        PurchaseOrderLine.product_id == suggestion.product_id,
+                        Supplier.is_active == True,
+                    )
+                    .order_by(
+                        Supplier.is_preferred.desc(),
+                        PurchaseOrder.po_date.desc(),
+                    )
+                    .first()
+                )
+
+                owner_mobile = getattr(tenant, "owner_mobile", None)
+                phone_id = getattr(tenant, "whatsapp_phone_id", None)
+                wa_token = getattr(tenant, "whatsapp_token", None)
+
+                if not supplier:
+                    if owner_mobile and phone_id and wa_token:
+                        send_whatsapp_message(
+                            owner_mobile,
+                            f"Low Stock: {product_name} needs reorder "
+                            f"({suggestion.suggested_quantity} units suggested) — "
+                            "no preferred supplier configured.",
+                            phone_id, wa_token,
+                        )
+                    continue
+
+                po_number = (
+                    f"PO-{tenant_id[:6].upper()}-"
+                    f"{int(now.timestamp())}-{suggestion.product_id}"
+                )
+                expected_delivery = now + timedelta(
+                    days=supplier.lead_time_days or suggestion.lead_time_days or 7
+                )
+
+                po = PurchaseOrder(
+                    tenant_id=tenant_id,
+                    supplier_id=supplier.id,
+                    po_number=po_number,
+                    po_date=now,
+                    expected_delivery=expected_delivery,
+                    po_status="draft",
+                    total_amount=0.0,
+                    reorder_suggestion_id=suggestion.id,
+                )
+                db.add(po)
+                db.flush()
+
+                line = PurchaseOrderLine(
+                    tenant_id=tenant_id,
+                    po_id=po.id,
+                    product_id=suggestion.product_id,
+                    product_name=product_name,
+                    quantity=suggestion.suggested_quantity,
+                    unit_cost=0.0,
+                    total_cost=0.0,
+                )
+                db.add(line)
+
+                suggestion.status = "ordered"
+                pos_created += 1
+
+                if owner_mobile and phone_id and wa_token:
+                    send_whatsapp_message(
+                        owner_mobile,
+                        f"Draft PO #{po_number} created for {product_name} — "
+                        f"{suggestion.suggested_quantity} units from {supplier.supplier_name}. "
+                        "Review and send from the dashboard.",
+                        phone_id, wa_token,
+                    )
+
+            db.commit()
+            request_logger.info(f"Created {pos_created} draft POs for {tenant_id}")
+            return {"status": "success", "pos_created": pos_created}
+
+        except Exception as exc:
+            request_logger.error(f"Auto PO creation error: {str(exc)}")
+            raise self.retry(exc=exc, countdown=60)
+
+
 @shared_task
 def cleanup_old_movements():
     """Archive old stock movements (older than 1 year)."""
@@ -417,6 +594,65 @@ def cleanup_old_movements():
 
         except Exception as exc:
             request_logger.error(f"Cleanup error: {str(exc)}")
+
+
+@shared_task(bind=True, max_retries=3)
+def check_back_in_stock(self, tenant_id: str):
+    """Notify watchlist customers when a previously out-of-stock SKU is restocked."""
+    with get_task_db() as db:
+        try:
+            from app.integrations.whatsapp_sender import send_whatsapp_message
+            from app.models.sku import ProductSKU
+
+            tenant = db.query(Tenant).filter(Tenant.tenant_id == tenant_id).first()
+            if not tenant:
+                return {"status": "error", "message": "Tenant not found"}
+
+            phone_id = getattr(tenant, "whatsapp_phone_id", None)
+            wa_token = getattr(tenant, "whatsapp_token", None)
+
+            # Find watchlist entries that haven't been notified yet
+            pending = db.query(StockWatchlist).filter(
+                StockWatchlist.tenant_id == tenant_id,
+                StockWatchlist.notified_at.is_(None),
+            ).all()
+
+            if not pending:
+                return {"status": "success", "notified": 0}
+
+            # Check which SKUs are now in stock
+            skus_to_check = list({w.sku for w in pending})
+            in_stock_skus = {
+                row[0] for row in db.query(ProductSKU.sku).filter(
+                    ProductSKU.tenant_id == tenant_id,
+                    ProductSKU.sku.in_(skus_to_check),
+                    ProductSKU.quantity > 0,
+                ).all()
+            }
+
+            now = datetime.utcnow()
+            notified = 0
+            for entry in pending:
+                if entry.sku not in in_stock_skus:
+                    continue
+                if phone_id and wa_token:
+                    send_whatsapp_message(
+                        entry.mobile,
+                        f"{entry.sku} is back in stock!\n"
+                        "Reply with the SKU to order now.",
+                        phone_id,
+                        wa_token,
+                    )
+                entry.notified_at = now
+                notified += 1
+
+            db.commit()
+            request_logger.info(f"Back-in-stock: notified {notified} customers for {tenant_id}")
+            return {"status": "success", "notified": notified}
+
+        except Exception as exc:
+            request_logger.error(f"Back-in-stock check error: {str(exc)}")
+            raise self.retry(exc=exc, countdown=60)
 
 
 @shared_task

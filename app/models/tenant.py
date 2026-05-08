@@ -19,6 +19,11 @@ class Tenant(Base):
     primary_color = Column(String, default="#0d9488")
     logo_url = Column(String, nullable=True)
     
+    # WhatsApp Cloud API credentials
+    whatsapp_phone_id = Column(String, nullable=True)
+    whatsapp_token = Column(String, nullable=True)
+    owner_mobile = Column(String, nullable=True)  # merchant's personal number for alerts
+
     # Business Profile for Invoicing
     gstin = Column(String(15), nullable=True)
     address_line1 = Column(String, nullable=True)

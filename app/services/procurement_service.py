@@ -4,7 +4,8 @@ from datetime import datetime, timedelta
 from app.models.procurement import (
     Supplier, PurchaseOrder, PurchaseOrderLine, SupplierPerformance,
     OrderFulfillment, BackorderAlert, InventoryRule, AutomationWorkflow,
-    InventoryCount, CountLine, ProductBarcode
+    InventoryCount, CountLine, ProductBarcode,
+    PickingBatch, PickingBatchOrder, PickingBatchLine,
 )
 from app.models.product import Product
 from app.models.order import Order
@@ -89,46 +90,106 @@ class ProcurementService:
 
         po.total_amount = total_amount
         self.db.commit()
-        
+
         return po.id
-    
-    def send_po_to_supplier(self, po_id: int, supplier_config: Dict) -> bool:
+
+    def create_purchase_order_from_suggestion(self, suggestion_id: int) -> int:
+        """Create a draft PO from a ReorderSuggestion and mark it ordered."""
+        from app.models.inventory import ReorderSuggestion
+        from app.models.product import Product
+
+        suggestion = self.db.query(ReorderSuggestion).filter(
+            ReorderSuggestion.id == suggestion_id,
+            ReorderSuggestion.tenant_id == self.tenant_id,
+        ).first()
+        if not suggestion:
+            raise ValueError(f"ReorderSuggestion {suggestion_id} not found")
+
+        supplier = self.db.query(Supplier).filter(
+            Supplier.tenant_id == self.tenant_id,
+            Supplier.is_active == True,
+            Supplier.is_preferred == True,
+        ).first()
+        if not supplier:
+            raise ValueError("No preferred supplier configured for this tenant")
+
+        product = self.db.query(Product).filter(Product.id == suggestion.product_id).first()
+        expected_delivery = datetime.utcnow() + timedelta(
+            days=supplier.lead_time_days or suggestion.lead_time_days or 7
+        )
+        po_id = self.create_purchase_order(
+            supplier_id=supplier.id,
+            expected_delivery=expected_delivery,
+            lines=[{
+                "product_id": suggestion.product_id,
+                "product_name": product.name if product else "",
+                "quantity": suggestion.suggested_quantity,
+                "unit_cost": 0.0,
+            }],
+        )
+        suggestion.status = "ordered"
+        suggestion.rationale = (suggestion.rationale or "") + f" | PO #{po_id} created"
+        self.db.commit()
+        return po_id
+
+    def send_po_to_supplier(self, po_id: int, supplier_config: Dict = None) -> bool:
         """Send PO via WhatsApp to supplier."""
         po = self.db.query(PurchaseOrder).filter(PurchaseOrder.id == po_id).first()
+        if not po:
+            return False
         supplier = self.db.query(Supplier).filter(Supplier.id == po.supplier_id).first()
-        
+
         if not supplier or not supplier.whatsapp_number:
             return False
-        
-        lines_text = ""
-        po_lines = self.db.query(PurchaseOrderLine).filter(PurchaseOrderLine.po_id == po_id).all()
-        
-        for i, line in enumerate(po_lines, 1):
-            lines_text += f"{i}. {line.product_name} x {line.quantity} @ ₹{line.unit_cost} = ₹{line.total_cost}\n"
-        
-        message = f"""📋 Purchase Order Confirmation
 
-PO Number: {po.po_number}
-Expected Delivery: {po.expected_delivery.strftime('%d-%m-%Y')}
-Total Amount: ₹{po.total_amount:,.2f}
+        # Resolve credentials: caller-supplied > tenant DB fallback
+        cfg = supplier_config or {}
+        phone_id = cfg.get("whatsapp_phone_id")
+        wa_token = cfg.get("whatsapp_token")
+        if not phone_id or not wa_token:
+            from app.models.tenant import Tenant
+            tenant = self.db.query(Tenant).filter(
+                Tenant.tenant_id == self.tenant_id
+            ).first()
+            phone_id = phone_id or getattr(tenant, "whatsapp_phone_id", None)
+            wa_token = wa_token or getattr(tenant, "whatsapp_token", None)
+            business_name = getattr(tenant, "business_name", "Our Business") if tenant else "Our Business"
+        else:
+            business_name = cfg.get("business_name", "Our Business")
 
-Items:
-{lines_text}
+        if not phone_id or not wa_token:
+            request_logger.warning(f"No WhatsApp credentials to send PO {po_id}")
+            return False
 
-Please confirm receipt and send shipping details.
-"""
-        
+        po_lines = self.db.query(PurchaseOrderLine).filter(
+            PurchaseOrderLine.po_id == po_id
+        ).all()
+
+        lines_text = "\n".join(
+            f"{i}. {line.product_name} x {line.quantity} @ Rs.{line.unit_cost} = Rs.{line.total_cost}"
+            for i, line in enumerate(po_lines, 1)
+        )
+
+        message = (
+            f"Purchase Order from {business_name}\n\n"
+            f"PO#: {po.po_number}\n"
+            f"Expected Delivery: {po.expected_delivery.strftime('%d %b %Y')}\n\n"
+            f"Items:\n{lines_text}\n\n"
+            f"Total: Rs.{po.total_amount:,.2f}\n\n"
+            "Please confirm receipt and provide shipping details."
+        )
+
         result = send_whatsapp_message(
             recipient_number=supplier.whatsapp_number,
             message_text=message,
-            phone_number_id=supplier_config.get("whatsapp_phone_id"),
-            whatsapp_token=supplier_config.get("whatsapp_token")
+            phone_number_id=phone_id,
+            whatsapp_token=wa_token,
         )
-        
+
         if result:
             po.po_status = "sent"
             self.db.commit()
-        
+
         return bool(result)
     
     def receive_po(self, po_id: int, received_lines: List[Dict]) -> bool:
@@ -413,10 +474,36 @@ Thanks for your patience! 🙏
         return triggered_actions
     
     def _evaluate_condition(self, condition: str) -> bool:
-        """Evaluate a rule condition string."""
-        # This is simplified. In production, use a proper expression evaluator
-        # or business rules engine like json-rules-engine
-        return True
+        """Evaluate a JSON condition: {"field": "stock_qty", "op": "lt", "value": 10}."""
+        try:
+            cond = json.loads(condition)
+        except (ValueError, TypeError):
+            return False
+
+        field = cond.get("field")
+        op = cond.get("op")
+        threshold = cond.get("value")
+
+        if field == "stock_qty":
+            from app.models.inventory import StockLocation
+            from sqlalchemy import func as sqlfunc
+            total = self.db.query(
+                sqlfunc.coalesce(sqlfunc.sum(StockLocation.quantity), 0)
+            ).filter(StockLocation.tenant_id == self.tenant_id).scalar() or 0
+            actual = int(total)
+        elif field == "pending_po_count":
+            from app.models.procurement import PurchaseOrder
+            actual = self.db.query(PurchaseOrder).filter(
+                PurchaseOrder.tenant_id == self.tenant_id,
+                PurchaseOrder.po_status.in_(["draft", "sent"]),
+            ).count()
+        else:
+            return False
+
+        ops = {"lt": actual < threshold, "lte": actual <= threshold,
+               "gt": actual > threshold, "gte": actual >= threshold,
+               "eq": actual == threshold, "ne": actual != threshold}
+        return ops.get(op, False)
 
 
 class SupplierPerformanceService:
@@ -470,5 +557,166 @@ class SupplierPerformanceService:
         if supplier:
             supplier.reliability_score = reliability_score
             self.db.commit()
-        
+
         return reliability_score
+
+
+class PickingService:
+    """Manage picking batches: create, picklist, scan-confirm, complete."""
+
+    def __init__(self, db: Session, tenant_id: str):
+        self.db = db
+        self.tenant_id = tenant_id
+
+    def create_batch(self, order_ids: List[int], picker_id: str, batch_name: str = None,
+                     warehouse_id: int = None) -> int:
+        """Create a picking batch for the given orders and build line items."""
+        from app.models.sku import ProductSKU
+        from app.models.inventory import StockLocation
+
+        name = batch_name or f"BATCH-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+        batch = PickingBatch(
+            tenant_id=self.tenant_id,
+            batch_name=name,
+            picker_id=picker_id,
+            warehouse_id=warehouse_id,
+            status="draft",
+        )
+        self.db.add(batch)
+        self.db.flush()  # get batch.id
+
+        orders = self.db.query(Order).filter(
+            Order.id.in_(order_ids),
+            Order.tenant_id == self.tenant_id,
+        ).all()
+
+        for order in orders:
+            self.db.add(PickingBatchOrder(batch_id=batch.id, order_id=order.id))
+
+            # Resolve bin/zone from StockLocation via ProductSKU
+            product_id = None
+            bin_number = None
+            zone_name = None
+            if order.sku:
+                psku = self.db.query(ProductSKU).filter(
+                    ProductSKU.sku == order.sku,
+                    ProductSKU.tenant_id == self.tenant_id,
+                ).first()
+                if psku and psku.product_id:
+                    product_id = psku.product_id
+                    loc = self.db.query(StockLocation).filter(
+                        StockLocation.tenant_id == self.tenant_id,
+                        StockLocation.product_id == psku.product_id,
+                    ).first()
+                    if loc:
+                        bin_number = loc.bin_number
+                        zone_name = loc.zone_name
+
+            self.db.add(PickingBatchLine(
+                batch_id=batch.id,
+                order_id=order.id,
+                sku=order.sku or "",
+                product_name=order.product_name or "",
+                product_id=product_id,
+                bin_number=bin_number,
+                zone_name=zone_name,
+                qty_required=order.quantity or 1,
+                qty_picked=0,
+                status="pending",
+            ))
+
+        self.db.commit()
+        return batch.id
+
+    def generate_picklist(self, batch_id: int) -> List[Dict]:
+        """Return pick lines sorted by zone then bin for efficient warehouse routing."""
+        lines = self.db.query(PickingBatchLine).filter(
+            PickingBatchLine.batch_id == batch_id,
+        ).order_by(
+            PickingBatchLine.zone_name,
+            PickingBatchLine.bin_number,
+        ).all()
+
+        return [
+            {
+                "line_id": line.id,
+                "order_id": line.order_id,
+                "sku": line.sku,
+                "product_name": line.product_name,
+                "bin_number": line.bin_number or "—",
+                "zone_name": line.zone_name or "—",
+                "qty_required": line.qty_required,
+                "qty_picked": line.qty_picked,
+                "status": line.status,
+            }
+            for line in lines
+        ]
+
+    def confirm_pick(self, batch_id: int, barcode: str, qty_picked: int) -> bool:
+        """Mark a line as picked via barcode scan."""
+        # Resolve barcode → product_id
+        pb = self.db.query(ProductBarcode).filter(
+            ProductBarcode.barcode == barcode,
+            ProductBarcode.tenant_id == self.tenant_id,
+        ).first()
+        if not pb:
+            return False
+
+        line = self.db.query(PickingBatchLine).filter(
+            PickingBatchLine.batch_id == batch_id,
+            PickingBatchLine.product_id == pb.product_id,
+            PickingBatchLine.status == "pending",
+        ).first()
+        if not line:
+            return False
+
+        line.qty_picked = qty_picked
+        line.status = "picked" if qty_picked >= line.qty_required else "short"
+        line.updated_at = datetime.utcnow()
+        self.db.commit()
+        return True
+
+    def complete_batch(self, batch_id: int) -> bool:
+        """Mark batch as packed and alert merchant via WhatsApp."""
+        batch = self.db.query(PickingBatch).filter(
+            PickingBatch.id == batch_id,
+            PickingBatch.tenant_id == self.tenant_id,
+        ).first()
+        if not batch:
+            return False
+
+        pending = self.db.query(PickingBatchLine).filter(
+            PickingBatchLine.batch_id == batch_id,
+            PickingBatchLine.status == "pending",
+        ).count()
+        if pending:
+            return False  # caller must confirm all lines first
+
+        batch.status = "packed"
+        batch.updated_at = datetime.utcnow()
+        self.db.commit()
+
+        order_count = self.db.query(PickingBatchOrder).filter(
+            PickingBatchOrder.batch_id == batch_id
+        ).count()
+
+        # Notify merchant
+        from app.models.tenant import Tenant
+        tenant = self.db.query(Tenant).filter(Tenant.tenant_id == self.tenant_id).first()
+        owner_mobile = getattr(tenant, "whatsapp_owner_mobile", None)
+        phone_id = getattr(tenant, "whatsapp_phone_id", None)
+        wa_token = getattr(tenant, "whatsapp_token", None)
+        if owner_mobile and phone_id and wa_token:
+            msg = (
+                f"Batch #{batch_id} ({batch.batch_name}) is fully picked — "
+                f"{order_count} orders ready to ship."
+            )
+            try:
+                import asyncio
+                asyncio.get_event_loop().run_until_complete(
+                    send_whatsapp_message(owner_mobile, msg, phone_id, wa_token)
+                )
+            except Exception:
+                pass  # alert failure must not block status update
+
+        return True
