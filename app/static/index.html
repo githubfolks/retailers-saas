@@ -129,7 +129,6 @@
 
             const [tenantForm, setTenantForm] = useState({
                 tenant_id: '', business_name: '', whatsapp_number: '',
-                odoo_url: '', odoo_db: '', odoo_user: '', odoo_password: '',
                 razorpay_key: '', razorpay_secret: '', n8n_webhook_url: '',
             });
 
@@ -215,7 +214,6 @@
                     showToast('Client created successfully');
                     setTenantForm({
                         tenant_id: '', business_name: '', whatsapp_number: '',
-                        odoo_url: '', odoo_db: '', odoo_user: '', odoo_password: '',
                         razorpay_key: '', razorpay_secret: '', n8n_webhook_url: '',
                     });
                     setCurrentPage('tenants');
@@ -381,8 +379,7 @@
                                                     <thead>
                                                         <tr>
                                                             <th>Business</th>
-                                                            <th>Contact / URL</th>
-                                                            <th>Database</th>
+                                                            <th>WhatsApp</th>
                                                             <th>Status</th>
                                                             <th>Actions</th>
                                                         </tr>
@@ -396,10 +393,6 @@
                                                                 </td>
                                                                 <td>
                                                                     <div style={{ fontSize: '0.875rem', fontWeight: 500 }}>{t.whatsapp_number}</div>
-                                                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{t.odoo_url}</div>
-                                                                </td>
-                                                                <td>
-                                                                    <span className="badge badge-primary" style={{ fontFamily: 'monospace', fontSize: '0.75rem' }}>{t.odoo_db}</span>
                                                                 </td>
                                                                 <td>
                                                                     <span className="badge badge-success">Active</span>
@@ -449,25 +442,6 @@
                                             <div className="form-group">
                                                 <label>WhatsApp Number *</label>
                                                 <input name="whatsapp_number" value={tenantForm.whatsapp_number} onChange={handleFormChange} required placeholder="91XXXXXXXXXX" />
-                                            </div>
-                                            <div className="form-group full-width">
-                                                <div className="form-section-title">Odoo ERP Connection</div>
-                                            </div>
-                                            <div className="form-group">
-                                                <label>Odoo URL *</label>
-                                                <input name="odoo_url" value={tenantForm.odoo_url} onChange={handleFormChange} required placeholder="https://erp.acme.com" />
-                                            </div>
-                                            <div className="form-group">
-                                                <label>Database Name *</label>
-                                                <input name="odoo_db" value={tenantForm.odoo_db} onChange={handleFormChange} required placeholder="acme_production" />
-                                            </div>
-                                            <div className="form-group">
-                                                <label>Odoo Username *</label>
-                                                <input name="odoo_user" value={tenantForm.odoo_user} onChange={handleFormChange} required placeholder="admin" />
-                                            </div>
-                                            <div className="form-group">
-                                                <label>Odoo Password *</label>
-                                                <input type="password" name="odoo_password" value={tenantForm.odoo_password} onChange={handleFormChange} required />
                                             </div>
                                             <div className="form-group full-width">
                                                 <div className="form-section-title">Payment & Workflow</div>
@@ -528,49 +502,20 @@
                                         <div className="detail-grid">
                                             <div className="form-card" style={{ margin: 0 }}>
                                                 <div className="form-header">
-                                                    <h3 className="outfit">ERP Connection</h3>
-                                                    <p>Odoo ERP integration settings</p>
+                                                    <h3 className="outfit">Workflow Automation</h3>
+                                                    <p>n8n webhook and automation settings</p>
                                                 </div>
                                                 <div>
                                                     <div className="form-group">
-                                                        <label>Odoo URL</label>
-                                                        <input value={selectedTenant.odoo_url} onChange={e => setSelectedTenant({ ...selectedTenant, odoo_url: e.target.value })} />
+                                                        <label>n8n Webhook URL</label>
+                                                        <input value={selectedTenant.n8n_webhook_url || ''} onChange={e => setSelectedTenant({ ...selectedTenant, n8n_webhook_url: e.target.value })} placeholder="https://n8n.cloud/webhook/..." />
                                                     </div>
                                                     <div className="form-group">
-                                                        <label>Database Name</label>
-                                                        <input value={selectedTenant.odoo_db} onChange={e => setSelectedTenant({ ...selectedTenant, odoo_db: e.target.value })} />
+                                                        <label>Status</label>
+                                                        <div style={{ padding: '0.75rem 1rem', background: 'var(--bg-glass)', borderRadius: '10px', border: '1px solid var(--border)', fontSize: '0.875rem', fontWeight: 600, color: selectedTenant.is_active ? 'var(--success)' : 'var(--danger)' }}>
+                                                            {selectedTenant.is_active ? 'Active' : 'Inactive'}
+                                                        </div>
                                                     </div>
-                                                    <div className="form-group">
-                                                        <label>Username</label>
-                                                        <input value={selectedTenant.odoo_user} onChange={e => setSelectedTenant({ ...selectedTenant, odoo_user: e.target.value })} />
-                                                    </div>
-                                                    <div className="form-group">
-                                                        <label>Password</label>
-                                                        <input type="password" value={selectedTenant.odoo_password} onChange={e => setSelectedTenant({ ...selectedTenant, odoo_password: e.target.value })} />
-                                                    </div>
-                                                    <button
-                                                        className="btn-secondary"
-                                                        style={{ width: '100%' }}
-                                                        disabled={loading}
-                                                        onClick={async () => {
-                                                            setLoading(true);
-                                                            try {
-                                                                const res = await API.post(`/tenants/${selectedTenant.tenant_id}/test-odoo`);
-                                                                if (res.data.status === 'success') {
-                                                                    showToast(res.data.message, 'success');
-                                                                } else {
-                                                                    showToast(res.data.message, 'error');
-                                                                }
-                                                            } catch (err) {
-                                                                showToast('Connection test failed', 'error');
-                                                            } finally {
-                                                                setLoading(false);
-                                                            }
-                                                        }}
-                                                    >
-                                                        <Icon name="zap" size={16} />
-                                                        Test Connection
-                                                    </button>
                                                 </div>
                                             </div>
 

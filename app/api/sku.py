@@ -31,7 +31,6 @@ class ProductSKUResponse(BaseModel):
     seasonal_price: Optional[float] = None
     seasonal_discount_pct: Optional[float] = 0.0
     reorder_point: int
-    odoo_product_id: Optional[int]
     shopify_product_id: Optional[str]
     woocommerce_product_id: Optional[int]
     amazon_asin: Optional[str]
@@ -158,43 +157,6 @@ def lookup_by_barcode(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error looking up barcode"
-        )
-
-
-@router.get("/lookup/odoo/{odoo_product_id}", response_model=SKULookupResponse)
-@limiter.limit("30/minute")
-def lookup_by_odoo_id(
-    request: Request,
-    odoo_product_id: int,
-    db: Session = Depends(get_db),
-    tenant_id: str = Depends(get_current_tenant)
-):
-    """Look up product by Odoo product ID"""
-    try:
-        service = SKULookupService(db)
-        product = service.get_product_by_odoo_id(odoo_product_id, tenant_id)
-        
-        if not product:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Product with Odoo ID {odoo_product_id} not found"
-            )
-        
-        sku = product.sku
-        return SKULookupResponse(
-            sku=sku,
-            product_name=product.product_name,
-            total_stock=service.get_total_stock_by_sku(sku, tenant_id),
-            available_stock=service.get_available_stock_by_sku(sku, tenant_id),
-            platforms=service.get_platform_ids_for_sku(sku, tenant_id)
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error looking up Odoo product {odoo_product_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error looking up product"
         )
 
 

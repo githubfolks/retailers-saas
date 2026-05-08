@@ -8,13 +8,6 @@ from app.core.celery_app import app
 
 # Configure Celery beat schedule
 app.conf.beat_schedule = {
-    # Sync stock from Odoo every 15 minutes
-    'sync-odoo-stock': {
-        'task': 'app.tasks.inventory_tasks.sync_stock_from_odoo',
-        'schedule': crontab(minute='*/15'),
-        'args': ('tenant_id',),  # Will be set per tenant
-    },
-    
     # Check low stock alerts every hour
     'check-low-stock': {
         'task': 'app.tasks.inventory_tasks.check_low_stock_alerts',
@@ -88,17 +81,7 @@ def register_tenant_tasks():
         
         for tenant in tenants:
             # Register tasks for each tenant
-            from app.tasks.inventory_tasks import (
-                sync_stock_from_odoo,
-                check_low_stock_alerts,
-                send_pending_notifications,
-                notify_suppliers_low_stock,
-                generate_demand_forecasts,
-                generate_reorder_suggestions
-            )
-            
-            # These would typically be triggered via API endpoints
-            # or a scheduler that iterates through all tenants
+            pass  # Tasks triggered via API endpoints or per-tenant scheduler
     
     finally:
         db.close()

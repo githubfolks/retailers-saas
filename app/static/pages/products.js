@@ -127,7 +127,7 @@
                     {products.length === 0 && !loading && (
                         <div style={{ padding: '6rem', textAlign: 'center', color: 'var(--text-muted)' }}>
                             <Icon name="package-search" size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
-                            <p>Catalog is empty. Import from Odoo to begin.</p>
+                            <p>Catalog is empty. Add your first product to begin.</p>
                         </div>
                     )}
                     {filteredProducts.length === 0 && products.length > 0 && (

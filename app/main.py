@@ -11,11 +11,9 @@ from app.api.coupons import router as coupons_router
 from app.api.payment_webhook import router as payment_router
 from app.api.admin import router as admin_router
 from app.api.settings import router as settings_router
-from app.api.sync import router as sync_router
 from app.api.inventory import router as inventory_router
 from app.api.procurement import router as procurement_router
 from app.api.analytics import router as analytics_router
-from app.api.odoo_webhooks import router as odoo_webhooks_router
 from app.api.sku import router as sku_router
 from app.api.customers import router as customers_router
 from app.api.returns import router as returns_router
@@ -86,11 +84,9 @@ app.include_router(coupons_router)
 app.include_router(payment_router)
 app.include_router(admin_router)
 app.include_router(settings_router)
-app.include_router(sync_router)
 app.include_router(inventory_router)
 app.include_router(procurement_router)
 app.include_router(analytics_router)
-app.include_router(odoo_webhooks_router)
 app.include_router(sku_router)
 app.include_router(customers_router)
 app.include_router(returns_router)

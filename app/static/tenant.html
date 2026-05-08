@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Merchant Dashboard | Odoo SaaS</title>
+    <title>Merchant Dashboard | RetailERP</title>
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1712,7 +1712,7 @@
                                             ) : (
                                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                                                     {skuPlatforms.map((pm, i) => {
-                                                        const iconMap = { odoo: 'layers', shopify: 'shopping-bag', amazon: 'package', woocommerce: 'globe' };
+                                                        const iconMap = { shopify: 'shopping-bag', amazon: 'package', woocommerce: 'globe' };
                                                         const isSync = pm.sync_status === 'synced';
                                                         return (
                                                             <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '1rem 1.25rem', background: 'var(--bg-main)', borderRadius: '12px', border: '1px solid var(--border)' }}>

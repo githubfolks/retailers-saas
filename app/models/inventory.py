@@ -147,7 +147,6 @@ class Warehouse(Base):
     manager_name = Column(String, nullable=True)
     manager_phone = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
-    odoo_warehouse_id = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

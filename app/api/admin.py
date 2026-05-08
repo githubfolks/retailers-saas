@@ -155,10 +155,6 @@ async def create_tenant(
         tenant_id=tenant.tenant_id,
         business_name=tenant.business_name,
         whatsapp_number=tenant.whatsapp_number,
-        odoo_url=tenant.odoo_url,
-        odoo_db=tenant.odoo_db,
-        odoo_user=tenant.odoo_user,
-        odoo_password=tenant.odoo_password,
         razorpay_key=tenant.razorpay_key,
         razorpay_secret=tenant.razorpay_secret,
         n8n_webhook_url=tenant.n8n_webhook_url,
@@ -197,33 +193,6 @@ async def update_tenant(
     db.refresh(tenant)
     
     return tenant
-
-
-@router.post("/tenants/{tenant_id}/test-odoo")
-async def test_tenant_odoo(
-    tenant_id: str,
-    authorization: str = Header(None),
-    db: Session = Depends(get_db),
-):
-    """Test the Odoo ERP link for a tenant (Admin only)."""
-    from app.integrations.odoo_base import OdooClient
-    
-    verify_admin_token(authorization)
-    
-    tenant = db.query(Tenant).filter(Tenant.tenant_id == tenant_id).first()
-    if not tenant or not tenant.odoo_url:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Tenant or Odoo config missing",
-        )
-    
-    try:
-        client = OdooClient(tenant.odoo_url, tenant.odoo_db, tenant.odoo_user, tenant.odoo_password)
-        if client.authenticate():
-            return {"status": "success", "message": "ERP Connection Verified"}
-        return {"status": "error", "message": "Authentication Failed"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
 
 
 @router.delete("/tenants/{tenant_id}")

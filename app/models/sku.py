@@ -55,7 +55,6 @@ class ProductSKU(Base):
     lead_time_days = Column(Integer, default=7)
     
     # Platform mappings (for multi-channel sync)
-    odoo_product_id = Column(Integer, unique=True, nullable=True, index=True)  # Odoo reference
     shopify_product_id = Column(String(255), nullable=True, index=True)  # Shopify reference
     woocommerce_product_id = Column(Integer, nullable=True, index=True)  # WooCommerce reference
     amazon_asin = Column(String(255), nullable=True, index=True)  # Amazon ASIN

@@ -73,17 +73,6 @@ class SKULookupService:
     
     # ========== PLATFORM-SPECIFIC LOOKUPS ==========
     
-    def get_product_by_odoo_id(self, odoo_product_id: int, tenant_id: str) -> Optional[ProductSKU]:
-        """Get product by Odoo product ID"""
-        try:
-            return self.db.query(ProductSKU).filter(
-                ProductSKU.odoo_product_id == odoo_product_id,
-                ProductSKU.tenant_id == tenant_id
-            ).first()
-        except Exception as e:
-            logger.error(f"Error fetching product by Odoo ID {odoo_product_id}: {str(e)}")
-            return None
-    
     def get_product_by_shopify_id(self, shopify_product_id: str, tenant_id: str) -> Optional[ProductSKU]:
         """Get product by Shopify product ID"""
         try:
@@ -186,7 +175,6 @@ class SKULookupService:
             
             mapping = {
                 'sku': product.sku,
-                'odoo': product.odoo_product_id,
                 'shopify': product.shopify_product_id,
                 'woocommerce': product.woocommerce_product_id,
                 'amazon': product.amazon_asin,

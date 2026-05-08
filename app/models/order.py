@@ -23,7 +23,6 @@ class Order(Base):
     status = Column(String, default="pending", index=True)
     payment_status = Column(String, default="pending")
     payment_id = Column(String, nullable=True)
-    odoo_id = Column(Integer, nullable=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

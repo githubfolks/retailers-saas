@@ -5,7 +5,6 @@ from typing import Optional
 from app.core.database import get_db
 from app.models.tenant import Tenant
 from app.api.auth import get_current_tenant_id, check_owner
-from app.integrations.odoo_base import OdooClient
 from app.core.logger import request_logger
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])

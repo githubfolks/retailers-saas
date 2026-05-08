@@ -10,10 +10,6 @@ const AdminDashboard = () => {
     tenant_id: '',
     business_name: '',
     whatsapp_number: '',
-    odoo_url: '',
-    odoo_db: '',
-    odoo_user: '',
-    odoo_password: '',
     razorpay_key: '',
     razorpay_secret: '',
     n8n_webhook_url: '',
@@ -92,10 +88,6 @@ const AdminDashboard = () => {
         tenant_id: '',
         business_name: '',
         whatsapp_number: '',
-        odoo_url: '',
-        odoo_db: '',
-        odoo_user: '',
-        odoo_password: '',
         razorpay_key: '',
         razorpay_secret: '',
         n8n_webhook_url: '',
@@ -235,7 +227,6 @@ const AdminDashboard = () => {
                     <th>Tenant ID</th>
                     <th>Business Name</th>
                     <th>WhatsApp</th>
-                    <th>Odoo DB</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
@@ -245,7 +236,6 @@ const AdminDashboard = () => {
                       <td>{tenant.tenant_id}</td>
                       <td>{tenant.business_name}</td>
                       <td>{tenant.whatsapp_number}</td>
-                      <td>{tenant.odoo_db}</td>
                       <td>
                         <button
                           className="view-btn"
@@ -310,50 +300,6 @@ const AdminDashboard = () => {
                 />
               </div>
               <div className="form-group">
-                <label>Odoo URL *</label>
-                <input
-                  type="text"
-                  name="odoo_url"
-                  value={tenantForm.odoo_url}
-                  onChange={handleFormChange}
-                  required
-                  placeholder="http://odoo.example.com"
-                />
-              </div>
-              <div className="form-group">
-                <label>Odoo Database *</label>
-                <input
-                  type="text"
-                  name="odoo_db"
-                  value={tenantForm.odoo_db}
-                  onChange={handleFormChange}
-                  required
-                  placeholder="odoo_db"
-                />
-              </div>
-              <div className="form-group">
-                <label>Odoo Username *</label>
-                <input
-                  type="text"
-                  name="odoo_user"
-                  value={tenantForm.odoo_user}
-                  onChange={handleFormChange}
-                  required
-                  placeholder="admin@example.com"
-                />
-              </div>
-              <div className="form-group">
-                <label>Odoo Password *</label>
-                <input
-                  type="password"
-                  name="odoo_password"
-                  value={tenantForm.odoo_password}
-                  onChange={handleFormChange}
-                  required
-                  placeholder="password"
-                />
-              </div>
-              <div className="form-group">
                 <label>Razorpay Key *</label>
                 <input
                   type="text"
@@ -406,14 +352,6 @@ const AdminDashboard = () => {
               <div className="detail-item">
                 <label>WhatsApp:</label>
                 <p>{selectedTenant.whatsapp_number}</p>
-              </div>
-              <div className="detail-item">
-                <label>Odoo URL:</label>
-                <p>{selectedTenant.odoo_url}</p>
-              </div>
-              <div className="detail-item">
-                <label>Odoo Database:</label>
-                <p>{selectedTenant.odoo_db}</p>
               </div>
               <div className="detail-item">
                 <label>Razorpay Key:</label>

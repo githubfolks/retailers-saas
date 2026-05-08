@@ -21,8 +21,7 @@ class Product(Base):
     price = Column(Float)
     sku = Column(String, index=True)
     quantity = Column(Integer, default=0)
-    odoo_id = Column(Integer, nullable=True)
-    
+
     # New relationships
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
     brand_id = Column(Integer, ForeignKey("brands.id"), nullable=True)

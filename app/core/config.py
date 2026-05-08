@@ -3,10 +3,9 @@ from typing import Optional
 
 
 class Settings(BaseSettings):
-    app_name: str = "Odoo SaaS API"
+    app_name: str = "SaaS API"
     postgres_url: str
     whatsapp_verify_token: str
-    odoo_url: str
     razorpay_key: str
     razorpay_secret: str = ""
     razorpay_webhook_secret: str = ""
@@ -41,7 +40,6 @@ class Settings(BaseSettings):
     # Ports
     fastapi_port: int = 9000
     redis_port: int = 6380
-    odoo_port: int = 8069
 
     class Config:
         env_file = ".env"

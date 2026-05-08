@@ -7,7 +7,7 @@ from app.core.logger import request_logger
 router = APIRouter(prefix="/whatsapp", tags=["WhatsApp Bot"])
 
 # VERIFICATION_TOKEN for Meta Webhook setup
-VERIFY_TOKEN = "odoo_saas_wa_token_2026"
+VERIFY_TOKEN = "saas_wa_verify_token_2026"
 
 @router.get("/webhook")
 async def verify_webhook(
